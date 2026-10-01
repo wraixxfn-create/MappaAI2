@@ -6,16 +6,43 @@ Esecuzione in Blender:
 Il file .blend e l'anteprima PNG vengono salvati accanto a questo script.
 Tutta la geometria e i materiali sono procedurali: nessun asset esterno richiesto.
 """
+import argparse
 import bpy
+import bmesh
+import hashlib
 import math
 import os
 import random
-from mathutils import Vector
+import sys
+from mathutils import Vector, noise
 
+# RNG separato per l'usura: aggiungere un intaglio non sposta l'architettura.
 random.seed(73)
 ROOT = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
-BLEND_PATH = os.path.join(ROOT, "porta_dell_inferno.blend")
-PREVIEW_PATH = os.path.join(ROOT, "porta_dell_inferno_preview.png")
+def opzioni():
+    parser = argparse.ArgumentParser(description="Rigenera la Porta dell'Inferno dettagliata.")
+    parser.add_argument("--no-render", action="store_true", help="Salva solo il modello.")
+    parser.add_argument("--detail-preview", action="store_true", help="Render aggiuntivo dei battenti.")
+    parser.add_argument("--output-dir", default=ROOT, help="Cartella dei file .blend e PNG.")
+    parser.add_argument("--preview-width", type=int, default=1080, help="Larghezza della preview in pixel.")
+    parser.add_argument("--preview-samples", type=int, default=64, help="Campioni massimi della preview.")
+    # Blender riserva gli argomenti dopo -- allo script; funziona anche via bpy.
+    args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else (
+        sys.argv[1:] if os.path.basename(sys.argv[0]) == "porta_inferno.py" else [])
+    opts = parser.parse_args(args)
+    if not 128 <= opts.preview_width <= 4000:
+        parser.error("--preview-width deve essere tra 128 e 4000.")
+    if not 1 <= opts.preview_samples <= 1024:
+        parser.error("--preview-samples deve essere tra 1 e 1024.")
+    return opts
+
+OPTS = opzioni()
+os.makedirs(OPTS.output_dir, exist_ok=True)
+BLEND_PATH = os.path.abspath(os.path.join(OPTS.output_dir, "porta_dell_inferno.blend"))
+PREVIEW_PATH = os.path.abspath(os.path.join(OPTS.output_dir, "porta_dell_inferno_preview.png"))
+DETAIL_PATH = os.path.abspath(os.path.join(OPTS.output_dir, "porta_dell_inferno_dettaglio.png"))
+FINAL_SIZE = (2000, 2320)
+FINAL_SAMPLES = 128
 
 # -----------------------------------------------------------------------------
 # Scene reset + organized collections
@@ -37,6 +64,7 @@ new_collection("02 • Portale | battenti di ferro")
 new_collection("03 • Sculture | anime e guardiani")
 new_collection("04 • Oltretomba | fuoco, lava, catene")
 new_collection("05 • Scena | terreno, camera, luci")
+new_collection("06 • Intagli | trafori e bassorilievi")
 ACTIVE = COLLECTIONS["01 • Architettura | basalto e conci"]
 
 def use_collection(name):
@@ -241,11 +269,22 @@ class Superficie:
 
     def rampa(self, fac, soglie, col="mask", riga=0, interp="LINEAR", etichetta=None):
         """Soglie: [(posizione, colore_o_valore)]; i float diventano grigi."""
+        soglie = sorted(soglie, key=lambda s: s[0])
+        minimo, massimo = soglie[0][0], soglie[-1][0]
+        # ColorRamp limita i cursori a [0, 1]. Le maschere di distanza in metri
+        # devono essere normalizzate PRIMA della rampa, non troncate a 1.
+        if minimo < 0.0 or massimo > 1.0:
+            normalizza = self.nodo("ShaderNodeMapRange", col, riga,
+                                  (etichetta or "Maschera") + " | metri → 0…1")
+            normalizza.clamp = True
+            self.costante(normalizza.inputs["Value"], fac)
+            normalizza.inputs["From Min"].default_value = minimo
+            normalizza.inputs["From Max"].default_value = massimo
+            fac = normalizza.outputs["Result"]
+            span = max(massimo - minimo, 1e-6)
+            soglie = [((pos - minimo) / span, val) for pos, val in soglie]
         n = self.nodo("ShaderNodeValToRGB", col, riga, etichetta)
-        try:
-            n.color_ramp.interpolation = interp
-        except Exception:
-            pass
+        n.color_ramp.interpolation = interp
         els = n.color_ramp.elements
         for i, soglia in enumerate(soglie):
             pos, val = soglia
@@ -422,11 +461,12 @@ def materiale_eroso(nome, viewport, r):
                         col="tex", riga=10, etichetta="Macchie di combustione")
 
     # ------------------------------------------------------- usura geometrica
+    # Pointiness è centrato su 0.5: sotto = concavo, sopra = convesso.
     puntuta = geo.outputs["Pointiness"]
     normale = geo.outputs["Normal"]
-    spigolo = S.rampa(puntuta, [(0.010, 0.0), (0.085, 0.35), (0.28, 1.0)], "mask", 2,
+    spigolo = S.rampa(puntuta, [(0.50, 0.0), (0.54, 0.35), (0.62, 1.0)], "mask", 2,
                       interp="EASE", etichetta="Spigoli esposti")
-    concavo = S.rampa(puntuta, [(0.0, 0.0), (-0.30, 1.0)], "mask", 3, interp="EASE",
+    concavo = S.rampa(puntuta, [(0.36, 1.0), (0.47, 0.30), (0.50, 0.0)], "mask", 3, interp="EASE",
                       etichetta="Cavità")
     su = S.vettore("DOT_PRODUCT", normale, S.combina(0, 0, 1, "mask", 4), col="mask",
                    riga=4, uscita=1, etichetta="Rivolto in alto")
@@ -902,7 +942,7 @@ stone = materiale_eroso(
          col_scottatura=(0.080, 0.032, 0.017),
          macro=(0.50, 6.0), meso=(3.23, 8.0), micro=(15.4, 3.0),
          medio=(2.00, 7.0),
-         crepa=(1.29, 1.00, 0.097), craquelure=(0.167, 0.42, 0.0117),
+         crepa=(1.29, 0.78, 0.036), craquelure=(0.167, 0.42, 0.006),
          vaioli=(0.061, 0.50), schegge=(0.099, 0.55),
          bruciatura=(0.33, 0.62), cenere=0.46, fuliggine=0.42, usura=0.55,
          rilievo=(0.95, 0.055), microrilievo=(0.20, 0.006),
@@ -920,7 +960,7 @@ stone_light = materiale_eroso(
          col_cenere=(0.245, 0.226, 0.208),
          macro=(0.58, 6.0), meso=(3.44, 8.0), micro=(16.8, 3.0),
          medio=(2.20, 7.0),
-         crepa=(0.99, 0.85, 0.069), craquelure=(0.139, 0.38, 0.0097),
+         crepa=(0.99, 0.68, 0.026), craquelure=(0.139, 0.38, 0.005),
          vaioli=(0.056, 0.42), schegge=(0.081, 0.70),
          bruciatura=(0.35, 0.50), cenere=0.55, fuliggine=0.34, usura=0.72,
          rilievo=(0.85, 0.048), microrilievo=(0.18, 0.005),
@@ -941,7 +981,7 @@ stone_dark = materiale_eroso(
          col_scottatura=(0.062, 0.024, 0.012),
          macro=(0.46, 7.0), meso=(2.99, 9.0), micro=(14.0, 3.0),
          medio=(1.90, 7.0),
-         crepa=(1.74, 1.00, 0.165), craquelure=(0.204, 0.55, 0.0174),
+         crepa=(1.74, 0.88, 0.054), craquelure=(0.204, 0.55, 0.008),
          vaioli=(0.067, 0.55), schegge=(0.134, 0.85),
          bruciatura=(0.30, 0.85), cenere=0.36, fuliggine=0.60, usura=0.42,
          rilievo=(1.05, 0.065), microrilievo=(0.22, 0.007),
@@ -959,7 +999,7 @@ stone_shadow = materiale_eroso(
          col_cenere=(0.115, 0.107, 0.104),
          macro=(0.44, 6.0), meso=(2.82, 8.0), micro=(12.6, 3.0),
          medio=(1.80, 7.0),
-         crepa=(1.89, 0.80, 0.161), craquelure=(0.256, 0.35, 0.0179),
+         crepa=(1.89, 0.70, 0.061), craquelure=(0.256, 0.35, 0.007),
          vaioli=(0.074, 0.35), schegge=(0.175, 0.45),
          bruciatura=(0.30, 0.45), cenere=0.40, fuliggine=0.45, usura=0.30,
          rilievo=(0.80, 0.045), microrilievo=(0.16, 0.005),
@@ -981,7 +1021,7 @@ iron = materiale_eroso(
          col_ruggine=(0.095, 0.038, 0.017),
          macro=(0.85, 6.0), meso=(4.18, 8.0), micro=(17.0, 3.0),
          medio=(3.00, 7.0),
-         crepa=(0.45, 0.55, 0.030), craquelure=(0.110, 0.40, 0.020),
+         crepa=(0.45, 0.40, 0.012), craquelure=(0.110, 0.34, 0.004),
          vaioli=(0.060, 0.00), schegge=(0.070, 0.32),
          bruciatura=(0.40, 0.60), cenere=0.30, fuliggine=0.55, usura=0.75,
          ruggine=0.42, graffi=(0.031, 0.35), martellatura=(0.14, 0.60), scaglie=(0.15, 0.60),
@@ -1004,7 +1044,7 @@ iron_leaf = materiale_eroso(
          col_ruggine=(0.088, 0.035, 0.015),
          macro=(0.70, 6.0), meso=(3.78, 8.0), micro=(16.0, 3.0),
          medio=(2.80, 7.0),
-         crepa=(0.68, 0.75, 0.037), craquelure=(0.120, 0.42, 0.022),
+         crepa=(0.68, 0.52, 0.014), craquelure=(0.120, 0.36, 0.005),
          vaioli=(0.060, 0.00), schegge=(0.085, 0.42),
          bruciatura=(0.36, 0.72), cenere=0.28, fuliggine=0.66, usura=0.70,
          ruggine=0.30, graffi=(0.035, 0.30), martellatura=(0.14, 0.68), scaglie=(0.14, 0.78),
@@ -1072,7 +1112,7 @@ bone = materiale_eroso(
          col_scottatura=(0.095, 0.045, 0.022),
          macro=(1.90, 6.0), meso=(5.00, 9.0), micro=(14.0, 3.0),
          medio=(4.50, 7.0),
-         crepa=(0.26, 0.30, 0.018), craquelure=(0.075, 0.55, 0.010),
+         crepa=(0.26, 0.30, 0.005), craquelure=(0.075, 0.45, 0.003),
          vaioli=(0.050, 0.35), schegge=(0.050, 0.30),
          bruciatura=(0.55, 0.50), cenere=0.28, fuliggine=0.45, usura=0.80,
          rilievo=(0.62, 0.020), microrilievo=(0.22, 0.004),
@@ -1093,7 +1133,7 @@ bone_shadow = materiale_eroso(
          col_scottatura=(0.070, 0.030, 0.015),
          macro=(1.90, 6.0), meso=(5.00, 9.0), micro=(14.0, 3.0),
          medio=(4.50, 7.0),
-         crepa=(0.26, 0.35, 0.018), craquelure=(0.075, 0.60, 0.010),
+         crepa=(0.26, 0.35, 0.006), craquelure=(0.075, 0.48, 0.003),
          vaioli=(0.050, 0.35), schegge=(0.050, 0.30),
          bruciatura=(0.55, 0.62), cenere=0.24, fuliggine=0.60, usura=0.70,
          rilievo=(0.60, 0.018), microrilievo=(0.20, 0.004),
@@ -1239,91 +1279,124 @@ lava_mat = materiale_eroso(
 # -----------------------------------------------------------------------------
 # Geometry helpers
 # -----------------------------------------------------------------------------
-def add_box(name, location, dimensions, material, bevel=0.035, parent=None, collection=None):
-    bpy.ops.mesh.primitive_cube_add(size=2.0, location=location)
-    obj = bpy.context.object
-    obj.name = name
-    obj.dimensions = dimensions
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    if material:
-        obj.data.materials.append(material)
-    if bevel and min(dimensions) > bevel * 2.2:
-        mod = obj.modifiers.new("Spigoli smussati a mano", "BEVEL")
-        mod.width = bevel
-        mod.segments = 2
-        mod.profile = 0.55
-        obj.modifiers.new("Normali da scultura", "WEIGHTED_NORMAL")
+# Data API / bmesh, invece di operatori per ogni pezzo. Le primitive minute
+# condividono la mesh; i conci usurati conservano invece una geometria unica.
+_PRIMITIVE_CACHE = {}
+
+
+def stable_rng(name):
+    return random.Random(int.from_bytes(hashlib.sha256(name.encode("utf-8")).digest()[:8], "big"))
+
+
+def mesh_object(name, mesh, location=(0, 0, 0), parent=None, collection=None):
+    obj = bpy.data.objects.new(name, mesh)
+    (collection or ACTIVE).objects.link(obj)
+    obj.location = location
     if parent:
         obj.parent = parent
-    link_object(obj, collection)
     return obj
 
 
-def add_uv_sphere(name, location, scale, material, segments=20, rings=12,
-                   smooth=True, parent=None, collection=None):
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=rings, radius=1.0,
-                                         location=location)
-    obj = bpy.context.object
-    obj.name = name
-    obj.scale = scale
+def primitive_mesh(kind, parameters, material, smooth=False):
+    key = (kind, parameters, material.name if material else None, smooth)
+    if key in _PRIMITIVE_CACHE:
+        return _PRIMITIVE_CACHE[key]
+    bm = bmesh.new()
+    if kind == "sphere":
+        segments, rings = parameters
+        bmesh.ops.create_uvsphere(bm, u_segments=segments, v_segments=rings, radius=1.0)
+    elif kind == "ico":
+        bmesh.ops.create_icosphere(bm, subdivisions=parameters[0], radius=1.0)
+    elif kind == "cone":
+        vertices, r1, r2, depth = parameters
+        bmesh.ops.create_cone(bm, cap_ends=True, cap_tris=False, segments=vertices,
+                             radius1=r1, radius2=r2, depth=depth)
+    mesh = bpy.data.meshes.new(f"{kind} | {len(_PRIMITIVE_CACHE):03d}")
+    bm.to_mesh(mesh)
+    bm.free()
     if material:
-        obj.data.materials.append(material)
-    if smooth:
-        for poly in obj.data.polygons:
-            poly.use_smooth = True
-    if parent:
-        obj.parent = parent
-    link_object(obj, collection)
+        mesh.materials.append(material)
+    for poly in mesh.polygons:
+        poly.use_smooth = smooth
+    _PRIMITIVE_CACHE[key] = mesh
+    return mesh
+
+
+def add_box(name, location, dimensions, material, bevel=0.035, parent=None, collection=None):
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    for v in bm.verts:
+        v.co = Vector((v.co.x * dimensions[0], v.co.y * dimensions[1], v.co.z * dimensions[2]))
+    # Veri tagli negli angoli, con piano e superficie di frattura: leggibili
+    # anche in modalità Solid e in silhouette, non semplici macchie di shader.
+    erodibile = material in (stone, stone_light, stone_dark, stone_shadow)
+    flagstone = name.startswith("Lastra fratturata")
+    if erodibile and (min(dimensions) > 0.25 or flagstone) and max(dimensions) < 7.0:
+        rng = stable_rng(name)
+        for _ in range(rng.randint(1, 3)):
+            signs = (rng.choice((-1, 1)), -1, rng.choice((-1, 1)))
+            normal = Vector(tuple(s * rng.uniform(0.7, 1.3) for s in signs))
+            if flagstone:
+                normal.z = 0.0
+            normal.normalize()
+            corner = Vector(tuple(s * d * 0.5 for s, d in zip(signs, dimensions)))
+            cut = (min(dimensions[:2]) if flagstone else min(dimensions)) * rng.uniform(0.045, 0.14)
+            result = bmesh.ops.bisect_plane(
+                bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+                plane_co=corner - normal * cut, plane_no=normal,
+                clear_outer=True, clear_inner=False, dist=0.00001)
+            boundary = [e for e in result["geom_cut"] if isinstance(e, bmesh.types.BMEdge) and e.is_boundary]
+            if boundary:
+                bmesh.ops.holes_fill(bm, edges=boundary, sides=0)
+        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+    mesh = bpy.data.meshes.new(name + " | pietra tagliata" if erodibile else name + " | mesh")
+    bm.to_mesh(mesh)
+    bm.free()
+    if material:
+        mesh.materials.append(material)
+    obj = mesh_object(name, mesh, location, parent, collection)
+    if bevel and min(dimensions) > bevel * 2.2:
+        mod = obj.modifiers.new("Spigoli smussati a mano", "BEVEL")
+        mod.width = bevel
+        mod.segments = 3
+        mod.profile = 0.55
+        obj.modifiers.new("Normali da scultura", "WEIGHTED_NORMAL")
+    return obj
+
+
+def add_uv_sphere(name, location, scale, material, segments=24, rings=16,
+                   smooth=True, parent=None, collection=None):
+    obj = mesh_object(name, primitive_mesh("sphere", (segments, rings), material, smooth),
+                      location, parent, collection)
+    obj.scale = scale
     return obj
 
 
 def add_ico(name, location, scale, material, subdivisions=1, parent=None, collection=None):
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=subdivisions, radius=1.0, location=location)
-    obj = bpy.context.object
-    obj.name = name
+    obj = mesh_object(name, primitive_mesh("ico", (subdivisions,), material), location, parent, collection)
     obj.scale = scale
-    if material:
-        obj.data.materials.append(material)
-    if parent:
-        obj.parent = parent
-    link_object(obj, collection)
     return obj
 
 
-def add_cylinder(name, location, radius, depth, material, vertices=20,
+def add_cylinder(name, location, radius, depth, material, vertices=24,
                  bevel=0.0, parent=None, collection=None):
-    bpy.ops.mesh.primitive_cylinder_add(vertices=vertices, radius=radius, depth=depth,
-                                        location=location)
-    obj = bpy.context.object
-    obj.name = name
-    if material:
-        obj.data.materials.append(material)
+    obj = mesh_object(name, primitive_mesh("cone", (vertices, radius, radius, depth), material),
+                      location, parent, collection)
     if bevel and depth > bevel * 3:
         mod = obj.modifiers.new("Bordo consumato", "BEVEL")
         mod.width = bevel
-        mod.segments = 2
+        mod.segments = 3
         obj.modifiers.new("Normali", "WEIGHTED_NORMAL")
-    if parent:
-        obj.parent = parent
-    link_object(obj, collection)
     return obj
 
 
-def add_cone(name, location, radius1, radius2, depth, material, vertices=12,
+def add_cone(name, location, radius1, radius2, depth, material, vertices=16,
              parent=None, collection=None):
-    bpy.ops.mesh.primitive_cone_add(vertices=vertices, radius1=radius1, radius2=radius2,
-                                    depth=depth, location=location)
-    obj = bpy.context.object
-    obj.name = name
-    if material:
-        obj.data.materials.append(material)
-    if parent:
-        obj.parent = parent
-    link_object(obj, collection)
-    return obj
+    return mesh_object(name, primitive_mesh("cone", (vertices, radius1, radius2, depth), material),
+                       location, parent, collection)
 
 
-def add_rod(name, a, b, radius, material, vertices=10, parent=None, collection=None):
+def add_rod(name, a, b, radius, material, vertices=12, parent=None, collection=None):
     va, vb = Vector(a), Vector(b)
     delta = vb - va
     if delta.length < 1e-5:
@@ -1335,19 +1408,31 @@ def add_rod(name, a, b, radius, material, vertices=10, parent=None, collection=N
     return obj
 
 
-def add_torus(name, location, major_radius, minor_radius, material, rotation=(0,0,0),
-              parent=None, collection=None, major_segments=20, minor_segments=8):
-    bpy.ops.mesh.primitive_torus_add(major_segments=major_segments, minor_segments=minor_segments,
-                                     location=location, major_radius=major_radius,
-                                     minor_radius=minor_radius)
-    obj = bpy.context.object
-    obj.name = name
+def add_torus(name, location, major_radius, minor_radius, material, rotation=(0, 0, 0),
+              parent=None, collection=None, major_segments=32, minor_segments=10):
+    key = ("torus", major_radius, minor_radius, major_segments, minor_segments, material.name)
+    if key not in _PRIMITIVE_CACHE:
+        verts, faces = [], []
+        for i in range(major_segments):
+            theta = math.tau * i / major_segments
+            for j in range(minor_segments):
+                phi = math.tau * j / minor_segments
+                r = major_radius + minor_radius * math.cos(phi)
+                verts.append((r * math.cos(theta), r * math.sin(theta), minor_radius * math.sin(phi)))
+                a = i * minor_segments + j
+                b = ((i + 1) % major_segments) * minor_segments + j
+                c = ((i + 1) % major_segments) * minor_segments + (j + 1) % minor_segments
+                d = i * minor_segments + (j + 1) % minor_segments
+                faces.append((a, b, c, d))
+        mesh = bpy.data.meshes.new(name + " | anello condiviso")
+        mesh.from_pydata(verts, [], faces)
+        mesh.materials.append(material)
+        mesh.update()
+        for poly in mesh.polygons:
+            poly.use_smooth = True
+        _PRIMITIVE_CACHE[key] = mesh
+    obj = mesh_object(name, _PRIMITIVE_CACHE[key], location, parent, collection)
     obj.rotation_euler = rotation
-    if material:
-        obj.data.materials.append(material)
-    if parent:
-        obj.parent = parent
-    link_object(obj, collection)
     return obj
 
 
@@ -1363,49 +1448,60 @@ def add_curve(name, points, radius, material, cyclic=False, parent=None,
     for point, coord in zip(spline.points, points):
         point.co = (coord[0], coord[1], coord[2], 1)
     spline.use_cyclic_u = cyclic
-    obj = bpy.data.objects.new(name, data)
     if material:
         data.materials.append(material)
-    if parent:
-        obj.parent = parent
-    (collection or ACTIVE).objects.link(obj)
-    return obj
+    return mesh_object(name, data, parent=parent, collection=collection)
 
 
 def add_extruded_polygon(name, outline_xz, front_y, back_y, material,
                          bevel=0.0, parent=None, collection=None):
-    n = len(outline_xz)
-    verts = [(x, front_y, z) for x, z in outline_xz] + [(x, back_y, z) for x, z in outline_xz]
-    faces = [tuple(range(n)), tuple(range(n, 2*n))[::-1]]
-    for i in range(n):
-        j = (i + 1) % n
-        faces.append((i, j, n+j, n+i))
+    outline = []
+    for p in outline_xz:
+        if not outline or (Vector(p) - Vector(outline[-1])).length > 1e-6:
+            outline.append(p)
+    if len(outline) > 2 and (Vector(outline[0]) - Vector(outline[-1])).length < 1e-6:
+        outline.pop()
+    area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(outline, outline[1:] + outline[:1]))
+    if area < 0:
+        outline.reverse()
+    n = len(outline)
+    verts = [(x, front_y, z) for x, z in outline] + [(x, back_y, z) for x, z in outline]
+    faces = [tuple(range(n)), tuple(range(n, 2 * n))[::-1]]
+    faces += [(i, i + n, (i + 1) % n + n, (i + 1) % n) for i in range(n)]
     mesh = bpy.data.meshes.new(name + " | mesh")
     mesh.from_pydata(verts, [], faces)
     mesh.materials.append(material)
     mesh.update()
-    obj = bpy.data.objects.new(name, mesh)
-    (collection or ACTIVE).objects.link(obj)
-    if parent:
-        obj.parent = parent
+    if material in (stone, stone_light, stone_dark, stone_shadow) and back_y - front_y > 0.12:
+        bm = bmesh.new()
+        bm.from_mesh(mesh)
+        bm.verts.ensure_lookup_table()
+        rng = stable_rng(name)
+        for i in rng.sample(range(n), min(2, n)):
+            if i < len(bm.verts) and bm.verts[i].is_valid:
+                bmesh.ops.bevel(bm, geom=[bm.verts[i]], offset=rng.uniform(0.025, 0.065),
+                                segments=1, affect="VERTICES", clamp_overlap=True)
+                bm.verts.ensure_lookup_table()
+        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+        bm.to_mesh(mesh)
+        bm.free()
+        mesh.update()
+    obj = mesh_object(name, mesh, parent=parent, collection=collection)
     if bevel:
         mod = obj.modifiers.new("Bordi scheggiati", "BEVEL")
         mod.width = bevel
-        mod.segments = 2
+        mod.segments = 3
         obj.modifiers.new("Normali pesate", "WEIGHTED_NORMAL")
     return obj
 
 
 def add_arch_fill(name, outline_xz, y, material, collection=None):
     verts = [(x, y, z) for x, z in outline_xz]
-    faces = [tuple(range(len(verts)))]
     mesh = bpy.data.meshes.new(name + " | mesh")
-    mesh.from_pydata(verts, [], faces)
+    mesh.from_pydata(verts, [], [tuple(range(len(verts)))])
     mesh.materials.append(material)
     mesh.update()
-    obj = bpy.data.objects.new(name, mesh)
-    (collection or ACTIVE).objects.link(obj)
-    return obj
+    return mesh_object(name, mesh, collection=collection)
 
 
 def parent_empty(name, location, z_rotation):
@@ -1416,6 +1512,92 @@ def parent_empty(name, location, z_rotation):
     obj.location = location
     obj.rotation_euler[2] = z_rotation
     return obj
+
+
+def add_tapered_tube(name, points, radii, material, sides=12, parent=None, collection=None):
+    """Loft con sezione orientata sulla tangente: corna, dita, nervature e spine."""
+    verts, faces = [], []
+    for i, (point, radius) in enumerate(zip(points, radii)):
+        tangent = Vector(points[min(i + 1, len(points) - 1)]) - Vector(points[max(0, i - 1)])
+        tangent.normalize()
+        guide = Vector((0, 1, 0)) if abs(tangent.y) < 0.9 else Vector((1, 0, 0))
+        u = tangent.cross(guide).normalized()
+        v = tangent.cross(u).normalized()
+        for j in range(sides):
+            a = math.tau * j / sides
+            verts.append(tuple(Vector(point) + radius * (u * math.cos(a) + v * math.sin(a))))
+        if i:
+            for j in range(sides):
+                faces.append(((i - 1) * sides + j, (i - 1) * sides + (j + 1) % sides,
+                              i * sides + (j + 1) % sides, i * sides + j))
+    faces += [tuple(range(sides - 1, -1, -1)),
+              tuple(range((len(points) - 1) * sides, len(points) * sides))]
+    mesh = bpy.data.meshes.new(name + " | scultura")
+    mesh.from_pydata(verts, [], faces)
+    mesh.materials.append(material)
+    mesh.update()
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    return mesh_object(name, mesh, parent=parent, collection=collection)
+
+
+_SKULL_MESH = None
+_SKULL_MATERIALS = {}
+
+
+def sculpted_cranium(material):
+    """Un unico cranio anatomico con orbite e naso realmente scavati.
+
+    I booleani vengono risolti una volta sola; nessun cutter nascosto nel .blend.
+    Le copie di questa scultura condividono la mesh, non migliaia di modificatori.
+    """
+    global _SKULL_MESH
+    if _SKULL_MESH is None:
+        bm = bmesh.new()
+        bmesh.ops.create_uvsphere(bm, u_segments=48, v_segments=32, radius=1.0)
+        for v in bm.verts:
+            q = v.co.copy()
+            # Tempie strette, calotta più ampia e fronte non sferica.
+            v.co = Vector((q.x * (0.37 - max(0.0, -q.z) * 0.11), q.y * 0.25,
+                           q.z * 0.43 + 0.035))
+        mesh = bpy.data.meshes.new("Cranio anatomico | orbite scavate")
+        bm.to_mesh(mesh)
+        bm.free()
+        head = mesh_object("__cranio_temporaneo", mesh)
+        for side in (-1, 1):
+            cutter = add_uv_sphere("__orbita_temporanea", (side * 0.143, -0.218, 0.028),
+                                   (0.121, 0.157, 0.137), None, segments=32, rings=24)
+            bpy.context.view_layer.update()
+            bpy.context.view_layer.objects.active = head
+            mod = head.modifiers.new("Scavo orbitale", "BOOLEAN")
+            mod.operation = "DIFFERENCE"
+            mod.solver = "EXACT"
+            mod.object = cutter
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+            bpy.data.objects.remove(cutter, do_unlink=True)
+        nose = add_extruded_polygon("__naso_temporaneo",
+                    [(-0.055, -0.025), (0.055, -0.025), (0.023, -0.17), (-0.023, -0.17)],
+                    -0.45, -0.10, void_mat)
+        bpy.context.view_layer.update()
+        bpy.context.view_layer.objects.active = head
+        mod = head.modifiers.new("Scavo nasale", "BOOLEAN")
+        mod.operation = "DIFFERENCE"
+        mod.solver = "EXACT"
+        mod.object = nose
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+        bpy.data.objects.remove(nose, do_unlink=True)
+        _SKULL_MESH = head.data
+        _SKULL_MESH.name = "Cranio anatomico | calotta, tempie, orbite e naso"
+        for poly in _SKULL_MESH.polygons:
+            poly.use_smooth = True
+        bpy.data.objects.remove(head, do_unlink=True)
+    if material.name not in _SKULL_MATERIALS:
+        mesh = _SKULL_MESH.copy()
+        mesh.materials.clear()
+        mesh.materials.append(material)
+        _SKULL_MATERIALS[material.name] = mesh
+    return _SKULL_MATERIALS[material.name]
+
 
 # -----------------------------------------------------------------------------
 # Gothic profile: paired, pointed Bezier arches
@@ -1473,8 +1655,13 @@ for row in range(5):
 for i, (yy, width, zz, thick) in enumerate([
         (-0.82, 8.6, 0.16, 0.34), (-1.57, 9.2, 0.34, 0.34),
         (-2.32, 9.8, 0.52, 0.36), (-3.07, 10.4, 0.70, 0.38)]):
-    add_box(f"Gradino cerimoniale {i+1}", (0, yy, zz), (width, 0.92, thick),
-            stone_light if i == 3 else stone, 0.09)
+    for j in range(7):
+        rng = stable_rng(f"gradino {i} {j}")
+        sw = width / 7
+        step = add_box(f"Gradino cerimoniale {i+1} | lastra {j+1}",
+                        (-width / 2 + (j + 0.5) * sw, yy, zz + rng.uniform(-0.012, 0.012)),
+                        (sw - 0.025, 0.92, thick), stone_light if i == 3 else stone, 0.055)
+        step.rotation_euler[2] = rng.uniform(-0.006, 0.006)
     add_box(f"Filo in ottone del gradino {i+1}", (0, yy-0.43, zz+thick*0.36),
             (width-0.22, 0.035, 0.025), bronze, 0.01)
 
@@ -1518,8 +1705,8 @@ def add_order(tag, inner, outer, y0, y1, skip=()):
                 continue
             t0 = i / 15.0 + 0.005
             t1 = (i + 1) / 15.0 - 0.005
-            outline = [arch_point(t0, *inner, side), arch_point(t1, *inner, side),
-                       arch_point(t1, *outer, side), arch_point(t0, *outer, side)]
+            outline = arch_points(*inner, side, steps=3, t0=t0, t1=t1)
+            outline += arch_points(*outer, side, steps=3, t0=t1, t1=t0)
             add_extruded_polygon(f"Ordine {tag} | concio {side:+d}.{i+1:02d}", outline,
                                  y0, y1,
                                  random.choice([stone_light, stone_light, stone, stone_light]),
@@ -1610,7 +1797,7 @@ for side in (-1, 1):
             stone, 0.05)
     for q, (dx, dy) in enumerate([(-0.40, -0.40), (0.40, -0.40), (-0.40, 0.30), (0.40, 0.30)]):
         add_cylinder(f"Colonnetta impegnata {side:+d}.{q+1}", (cx+dx, -0.55+dy, 3.05),
-                     0.26, 4.95, stone_light, vertices=12, bevel=0.02)
+                     0.26, 4.95, stone_light, vertices=32, bevel=0.02)
         if dy < 0:
             add_box(f"Scanalatura profonda {side:+d}.{q+1}", (cx+dx, -1.19, 3.05),
                     (0.075, 0.10, 4.5), stone_dark, 0.012)
@@ -1653,24 +1840,44 @@ for side, spec in TOWERS.items():
         h = z1 - z0
         zc = z0 + h/2
         shift = side*lean*zc*2.2
-        b = add_box(f"Torre {side:+d} | tronco {s_i+1}", (tx+shift, -0.75, zc),
-                    (widths[s_i], 2.00, h), stone if s_i % 2 else stone_light, 0.07)
+        b = add_box(f"Torre {side:+d} | nucleo {s_i+1}", (tx+shift, -0.75, zc),
+                    (widths[s_i] - 0.18, 1.82, h), stone_shadow, 0.035)
         b.rotation_euler[1] = side*lean + random.uniform(-0.005, 0.005)
+        # Corsi di conci singoli, giunti sfalsati e cantonali alternati.
+        rng = stable_rng(f"torre {side} {s_i}")
+        courses = max(1, round(h / 0.64))
+        ch = h / courses
+        for course in range(courses):
+            zz = z0 + (course + 0.5) * ch
+            xx = tx + side * lean * zz * 2.2
+            w = widths[s_i]
+            split = w * (0.40 if course % 2 else 0.60)
+            for q, (dx, bw) in enumerate(((-w / 2 + split / 2, split),
+                                          (split / 2, w - split))):
+                stone_obj = add_box(f"Torre {side:+d} | concio {s_i+1}.{course+1:02d}.{q+1}",
+                        (xx + dx, -1.67, zz), (bw - 0.028, 0.30, ch - 0.030),
+                        rng.choice((stone, stone_light, stone, stone_dark)), 0.032)
+                stone_obj.rotation_euler[1] = side * lean + rng.uniform(-0.009, 0.009)
+            for corner in (-1, 1):
+                for q in range(2):
+                    add_box(f"Torre {side:+d} | cantonale {s_i+1}.{course+1:02d}.{corner:+d}.{q}",
+                            (xx + corner * (w / 2 - 0.08), -1.12 + q * 0.83, zz),
+                            (0.25, 0.80, ch - 0.030), rng.choice((stone, stone_light)), 0.03)
         # deep horizontal groove at each setback
         add_box(f"Torre {side:+d} | gola del ritiro {s_i+1}", (tx+shift, -1.78, z1),
                 (widths[s_i]+0.18, 0.14, 0.17), stone_dark, 0.02)
         # vertical corner incisions
         for cside in (-1, 1):
             add_box(f"Torre {side:+d} | incisione d'angolo {s_i+1}.{cside:+d}",
-                    (tx+shift+cside*widths[s_i]*0.42, -1.76, zc),
-                    (0.07, 0.08, h-0.25), stone_dark, 0.01)
+                    (tx+shift+cside*widths[s_i]*0.42, -1.835, zc),
+                    (0.045, 0.045, h-0.25), stone_dark, 0.01)
         # rune-like dashes carved in the face
         for k in range(3):
             rz = z0 + 0.8 + k*1.15 + random.uniform(-0.15, 0.15)
             if rz > z1 - 0.4:
                 continue
             add_box(f"Torre {side:+d} | tacca {s_i+1}.{k+1}",
-                    (tx+shift+random.uniform(-0.35, 0.35), -1.77, rz),
+                    (tx+shift+random.uniform(-0.35, 0.35), -1.838, rz),
                     (random.uniform(0.16, 0.34), 0.07, 0.09), stone_dark, 0.01)
     if spec["broken"]:
         for k, (dx, h, tilt) in enumerate([(-0.45, 2.0, -0.16), (0.05, 1.2, 0.05),
@@ -1722,11 +1929,8 @@ for side in (-1, 1):
     for i in range(13):
         t0 = i / 13.0 + 0.006
         t1 = (i + 1) / 13.0 - 0.006
-        inner0 = arch_point(t0, INNER_A, INNER_SPRING, INNER_TOP, side)
-        inner1 = arch_point(t1, INNER_A, INNER_SPRING, INNER_TOP, side)
-        outer0 = arch_point(t0, OUTER_A, OUTER_SPRING, OUTER_TOP, side)
-        outer1 = arch_point(t1, OUTER_A, OUTER_SPRING, OUTER_TOP, side)
-        outline = [inner0, inner1, outer1, outer0]
+        outline = arch_points(INNER_A, INNER_SPRING, INNER_TOP, side, steps=3, t0=t0, t1=t1)
+        outline += arch_points(OUTER_A, OUTER_SPRING, OUTER_TOP, side, steps=3, t0=t1, t1=t0)
         add_extruded_polygon(f"Concio d'arco {side:+d}.{i+1:02d}", outline,
                              -0.94, 0.10,
                              random.choice([stone, stone, stone_light, stone_dark]),
@@ -1867,8 +2071,12 @@ def add_text(name, body, location, size, material, align="CENTER", extrude=0.012
     data.materials.append(material)
     return obj
 
+letter_gold = principled_material("Ottone della sentenza | grana fine e rilievo leggibile",
+                  (0.34, 0.20, 0.062, 1), metallic=0.86, roughness=0.34,
+                  noise_scale=42, bump_strength=0.15, bump_distance=0.0015,
+                  color_low=(0.18, 0.095, 0.025, 1), color_high=(0.49, 0.30, 0.095, 1))
 add_text("Avvertimento | Lasciate ogni speranza", "LASCIATE OGNI SPERANZA, VOI CH'ENTRATE",
-         (0.12, -1.875, 14.06), 0.32, gold, extrude=0.015)
+         (0.12, -1.875, 14.06), 0.32, letter_gold, extrude=0.015)
 # Small rosettes at the corners of the inscription.
 for side in (-1, 1):
     add_ico(f"Rosone della targa {side:+d}", (0.12+side*4.08, -1.88, 14.05),
@@ -1886,55 +2094,78 @@ for side in (-1, 1):
 def add_skull_relief(name, x, y, z, size, parent=None, collection=None,
                      skull_mat=bone, glow=True):
     col = collection or ACTIVE
-    add_ico(name + " | cranio", (x, y, z), (0.38*size, 0.225*size, 0.42*size),
-            skull_mat, subdivisions=2, parent=parent, collection=col)
-    add_ico(name + " | mandibola", (x, y-0.006*size, z-0.27*size),
-            (0.31*size, 0.19*size, 0.20*size), skull_mat, subdivisions=1,
-            parent=parent, collection=col)
-    # Recessed sockets, surrounded by raised orbital ridges.
+
+    def p(dx, dy, dz):
+        return (x + dx * size, y + dy * size, z + dz * size)
+
+    head = mesh_object(name + " | cranio scolpito con orbite cave", sculpted_cranium(skull_mat),
+                       (x, y, z), parent, col)
+    head.scale = (size, size, size)
     for side in (-1, 1):
-        ex = x + side*0.145*size
-        ez = z + 0.045*size
-        add_uv_sphere(name + " | orbita", (ex, y-0.195*size, ez),
-                      (0.105*size, 0.045*size, 0.12*size), void_mat,
-                      segments=14, rings=8, parent=parent, collection=col)
-        orbit = []
-        for j in range(25):
-            a = math.tau*j/24
-            orbit.append((ex+math.cos(a)*0.112*size, y-0.225*size,
-                          ez+math.sin(a)*0.132*size))
-        add_curve(name + " | arcata dell'orbita", orbit, 0.026*size, skull_mat,
-                  parent=parent, resolution=2, collection=col)
+        # Il fondo è arretrato dentro uno scavo reale, non un disco sulla faccia.
+        add_uv_sphere(name + f" | fondo dell'orbita {side:+d}", p(side * 0.143, -0.087, 0.027),
+                      (0.10 * size, 0.06 * size, 0.116 * size), void_mat,
+                      segments=20, rings=12, parent=parent, collection=col)
         if glow:
-            add_uv_sphere(name + " | brace nell'occhio", (ex, y-0.244*size, ez),
-                          (0.033*size, 0.02*size, 0.034*size), eye_glow,
-                          segments=10, rings=6, parent=parent, collection=col)
-    # Nasal cavity: a tiny inverted triangular recess.
-    add_extruded_polygon(name + " | cavità nasale",
-                         [(x-0.066*size,z-0.02*size), (x+0.066*size,z-0.02*size),
-                          (x,z-0.19*size)], y-0.225*size, y-0.21*size,
-                         void_mat, parent=parent, collection=col)
-    # Brow ridge and five individually modelled teeth.
-    brow = [(x-0.27*size,y-0.23*size,z+0.18*size),
-            (x-0.13*size,y-0.25*size,z+0.22*size),
-            (x,y-0.255*size,z+0.18*size),
-            (x+0.13*size,y-0.25*size,z+0.22*size),
-            (x+0.27*size,y-0.23*size,z+0.18*size)]
-    add_curve(name + " | arcata sopracciliare", brow, 0.045*size, skull_mat,
-              parent=parent, resolution=3, collection=col)
-    for tooth in range(5):
-        tx = x + (tooth-2)*0.095*size
-        add_box(name + f" | dente {tooth+1}", (tx, y-0.223*size, z-0.345*size),
-                (0.07*size, 0.075*size, 0.115*size), skull_mat, 0.012*size,
-                parent=parent, collection=col)
-    # Short curled horns, a little more infernal than anatomical.
+            add_uv_sphere(name + f" | brace nell'occhio {side:+d}", p(side * 0.143, -0.172, 0.027),
+                          (0.022 * size, 0.019 * size, 0.024 * size), eye_glow,
+                          segments=16, rings=12, parent=parent, collection=col)
+        add_tapered_tube(name + f" | zigomo {side:+d}",
+                         [p(side * 0.27, -0.15, 0.04), p(side * 0.30, -0.185, -0.08),
+                          p(side * 0.24, -0.225, -0.16), p(side * 0.15, -0.219, -0.21)],
+                         [r * size for r in (0.04, 0.055, 0.048, 0.025)], skull_mat,
+                         parent=parent, collection=col)
+        add_tapered_tube(name + f" | arcata sopracciliare {side:+d}",
+                         [p(side * 0.034, -0.232, 0.145), p(side * 0.10, -0.244, 0.177),
+                          p(side * 0.20, -0.208, 0.185), p(side * 0.275, -0.166, 0.15)],
+                         [r * size for r in (0.031, 0.037, 0.031, 0.015)], skull_mat,
+                         parent=parent, collection=col)
+    add_extruded_polygon(name + " | fondo della cavità nasale",
+                         [(x - 0.05 * size, z - 0.03 * size), (x + 0.05 * size, z - 0.03 * size),
+                          (x + 0.02 * size, z - 0.165 * size), (x - 0.02 * size, z - 0.165 * size)],
+                         y - 0.12 * size, y - 0.105 * size, void_mat, parent=parent, collection=col)
+    # Mandibola a ferro di cavallo, bocca aperta, due file di denti irregolari.
+    jaw = [(-0.285, -0.15), (-0.27, -0.36), (-0.16, -0.46), (0.16, -0.46),
+           (0.27, -0.36), (0.285, -0.15), (0.225, -0.18), (0.21, -0.32),
+           (0.12, -0.365), (-0.12, -0.365), (-0.21, -0.32), (-0.225, -0.18)]
+    add_extruded_polygon(name + " | mandibola anatomica",
+                         [(x + dx * size, z + dz * size) for dx, dz in jaw],
+                         y - 0.19 * size, y + 0.02 * size, skull_mat, bevel=0.02 * size,
+                         parent=parent, collection=col)
+    add_uv_sphere(name + " | ombra della bocca", p(0, -0.212, -0.292),
+                  (0.215 * size, 0.032 * size, 0.073 * size), void_mat,
+                  parent=parent, collection=col)
+    rng = stable_rng(name)
+    for row in range(2):
+        for i in range(8):
+            dx = (i - 3.5) * 0.047
+            # Un incisivo rotto su alcuni mascheroni; nessuna fila perfetta.
+            length = rng.uniform(0.050, 0.083) * (0.65 if i == 2 and row else 1.0)
+            tooth = add_box(name + f" | dente {row + 1}.{i + 1}",
+                            p(dx, -0.233 + abs(dx) * 0.09, -0.242 if row == 0 else -0.346),
+                            (0.039 * size, 0.06 * size, length * size), skull_mat,
+                            0.010 * size, parent=parent, collection=col)
+            tooth.rotation_euler[1] = rng.uniform(-0.10, 0.10)
+    # Sutural seams follow the curved forehead, rather than floating over it.
+    seam = [(0, -0.246, 0.12), (0.011, -0.235, 0.19), (-0.006, -0.214, 0.26),
+            (0.009, -0.182, 0.32), (-0.002, -0.136, 0.395)]
+    add_curve(name + " | sutura frontale", [p(*q) for q in seam], 0.004 * size,
+              bone_shadow, resolution=1, parent=parent, collection=col)
     for side in (-1, 1):
-        pts = [(x+side*0.26*size, y-0.12*size, z+0.28*size),
-               (x+side*0.43*size, y-0.13*size, z+0.48*size),
-               (x+side*0.51*size, y-0.11*size, z+0.66*size),
-               (x+side*0.42*size, y-0.12*size, z+0.70*size)]
-        add_curve(name + " | corno", pts, 0.045*size, skull_mat,
-                  parent=parent, resolution=3, collection=col)
+        horn = [p(side * 0.245, -0.075, 0.305), p(side * 0.34, -0.082, 0.46),
+                p(side * 0.40, -0.053, 0.60), p(side * 0.39, -0.023, 0.735),
+                p(side * 0.315, -0.018, 0.79)]
+        add_tapered_tube(name + f" | corno rastremato {side:+d}", horn,
+                         [r * size for r in (0.071, 0.058, 0.037, 0.019, 0.002)],
+                         skull_mat, parent=parent, collection=col)
+        # Creste di crescita scolpite alla radice del corno.
+        for j in range(3):
+            t = 0.06 + j * 0.09
+            add_uv_sphere(name + f" | cresta del corno {side:+d}.{j}",
+                          p(side * (0.25 + t * 0.56), -0.105, 0.31 + t),
+                          (0.065 * size, 0.017 * size, 0.013 * size), skull_mat,
+                          segments=16, rings=8, parent=parent, collection=col)
+
 
 use_collection("02 • Portale | battenti di ferro")
 DOOR_Y = 0.18
@@ -1992,7 +2223,7 @@ for side in (-1, 1):
               0.63, 0.055, gold, rotation=(math.pi/2,0,0), parent=root)
     add_torus(f"Corona interna del mascherone {side:+d}", (boss_x, -0.565, 3.37),
               0.47, 0.025, bronze, rotation=(math.pi/2,0,0), parent=root)
-    add_skull_relief("Mascherone infernale del battente", boss_x, -0.53, 3.36,
+    add_skull_relief(f"Mascherone infernale del battente {side:+d}", boss_x, -0.53, 3.36,
                      1.28, parent=root, skull_mat=bone, glow=True)
     # Smaller roundels, decorative radial spokes and a central hanging ring.
     for zc in (1.66, 5.08):
@@ -2079,28 +2310,62 @@ for side in (-1, 1):
 use_collection("03 • Sculture | anime e guardiani")
 
 def add_robe_mesh(name, cx, cy, z_base, ringspec, material):
-    n = 12
-    verts = []
-    faces = []
-    for z, rx, ry, offset_x in ringspec:
+    # Pieghe longitudinali vere: il manto non è più un cono liscio.
+    n, layers = 64, 36
+    verts, faces = [], []
+    bottom, top = ringspec[0][0], ringspec[-1][0]
+    for r in range(layers):
+        t = r / (layers - 1)
+        z = bottom + t * (top - bottom)
+        for a, b in zip(ringspec[:-1], ringspec[1:]):
+            if a[0] <= z <= b[0] + 1e-6:
+                q = (z - a[0]) / (b[0] - a[0])
+                rx, ry, offset_x = [a[k] * (1 - q) + b[k] * q for k in (1, 2, 3)]
+                break
         for j in range(n):
-            a = math.tau*j/n
-            verts.append((cx + offset_x + rx*math.cos(a), cy + ry*math.sin(a), z))
-    for r in range(len(ringspec)-1):
-        for j in range(n):
-            a = r*n+j
-            b = r*n+(j+1)%n
-            faces.append((a,b,b+n,a+n))
-    faces.append(tuple(range(n-1,-1,-1)))
-    faces.append(tuple(range((len(ringspec)-1)*n, len(ringspec)*n)))
-    mesh = bpy.data.meshes.new(name + " | drappeggio")
+            angle = math.tau * j / n
+            folds = (0.035 * math.cos(10 * angle + t * 0.9)
+                     + 0.014 * math.cos(19 * angle - t * 1.2)) * (1.0 - t * 0.18)
+            hem = (0.045 * math.sin(7 * angle) + 0.018 * math.cos(13 * angle)) * max(0, 1 - t * 12)
+            verts.append((cx + offset_x + (rx + folds) * math.cos(angle),
+                          cy + (ry + folds) * math.sin(angle), z + hem))
+        if r:
+            faces.extend(((r - 1) * n + j, (r - 1) * n + (j + 1) % n,
+                          r * n + (j + 1) % n, r * n + j) for j in range(n))
+    faces += [tuple(range(n - 1, -1, -1)), tuple(range((layers - 1) * n, layers * n))]
+    mesh = bpy.data.meshes.new(name + " | 36 anelli, 64 campioni delle pieghe")
     mesh.from_pydata(verts, [], faces)
     mesh.materials.append(material)
     mesh.update()
-    obj = bpy.data.objects.new(name, mesh)
-    ACTIVE.objects.link(obj)
-    for p in mesh.polygons:
-        p.use_smooth = True
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    return mesh_object(name, mesh)
+
+
+def add_sculpted_wing(name, outline, y, material):
+    mesh = bpy.data.meshes.new(name + " | membrane ondulata")
+    mesh.from_pydata([(x, y, z) for x, z in outline], [], [tuple(range(len(outline)))])
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bmesh.ops.triangulate(bm, faces=list(bm.faces))
+    bmesh.ops.subdivide_edges(bm, edges=list(bm.edges), cuts=5, use_grid_fill=True)
+    xmin, xmax = min(p[0] for p in outline), max(p[0] for p in outline)
+    zmin, zmax = min(p[1] for p in outline), max(p[1] for p in outline)
+    for v in bm.verts:
+        u = (v.co.x - xmin) / (xmax - xmin)
+        t = (v.co.z - zmin) / (zmax - zmin)
+        v.co.y += 0.12 * math.sin(u * math.pi) * math.sin(t * math.pi) * math.cos(t * 14 - u * 9)
+    bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.materials.append(material)
+    mesh.update()
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    obj = mesh_object(name, mesh)
+    mod = obj.modifiers.new("Spessore dell'ala scolpita", "SOLIDIFY")
+    mod.thickness = 0.08
+    mod.offset = 0.0
     return obj
 
 
@@ -2143,10 +2408,15 @@ def guardian(side):
         add_rod(label + " | avambraccio", elbows[i], wrists[i], 0.11, bone_shadow, vertices=10)
         add_uv_sphere(label + " | mano", wrists[i], (0.13,0.10,0.15), bone, segments=12, rings=8)
         direction = -1 if i == 0 else 1
-        for f in range(3):
-            start = (wrists[i][0]+direction*(f-1)*0.045, wrists[i][1]-0.03, wrists[i][2]-0.06)
-            end = (start[0]+direction*0.025, start[1]-0.015, start[2]-0.19)
-            add_rod(label + " | falange", start, end, 0.024, bone, vertices=7)
+        for f in range(5):
+            start = (wrists[i][0] + direction * (f - 2) * 0.036,
+                     wrists[i][1] - 0.07, wrists[i][2] - 0.025)
+            mid = (start[0] + direction * 0.015, start[1] - 0.025, start[2] - 0.11)
+            end = (mid[0] - direction * 0.01, mid[1] + 0.018, mid[2] - 0.09 + abs(f - 2) * 0.016)
+            add_tapered_tube(label + f" | dito articolato {i+1}.{f+1}",
+                             [start, mid, end], [0.023, 0.020, 0.013], bone, sides=10)
+            add_uv_sphere(label + f" | nocca {i+1}.{f+1}", mid, (0.024, 0.021, 0.025),
+                          bone, segments=12, rings=8)
     # Tattered bat-wing relief on the outer side; slender ribs emerge from the shroud.
     wing_y = -1.95
     wing_outline = [
@@ -2155,16 +2425,16 @@ def guardian(side):
         (x+out*1.19,4.45),(x+out*1.34,5.05),(x+out*0.88,4.75),
         (x+out*0.53,4.18),(x+out*0.37,3.55)
     ]
-    add_extruded_polygon(label + " | ala di pietra", wing_outline,
-                         wing_y, wing_y+0.13, stone_dark, bevel=0.02)
+    add_sculpted_wing(label + " | ala di pietra ripiegata", wing_outline, wing_y, stone_dark)
     rib_tips = [(x+out*1.34,5.05),(x+out*1.19,4.45),(x+out*1.52,4.02),
                 (x+out*1.06,3.70),(x+out*1.24,3.05)]
     for ri, tip in enumerate(rib_tips):
-        add_curve(label + f" | nervatura dell'ala {ri+1}",
-                  [(x+out*0.27,wing_y-0.04,3.07),
-                   (x+out*0.52,wing_y-0.06,3.55+ri*0.05),
+        add_tapered_tube(label + f" | nervatura scolpita dell'ala {ri+1}",
+                  [(x+out*0.27,wing_y-0.06,3.07),
+                   (x+out*0.52,wing_y-0.10,3.55+ri*0.05),
+                   (tip[0]-out*0.10,wing_y-0.09,tip[1]-0.12),
                    (tip[0],wing_y-0.04,tip[1])],
-                  0.035, stone_light, resolution=3)
+                  [0.056, 0.040, 0.022, 0.003], stone_light)
     # Torn cloak folds / shroud tails.
     for i in range(5):
         xx = x + (i-2)*0.12
@@ -2240,6 +2510,436 @@ for side in (-1,1):
                          skull_mat=bone_shadow,glow=(j==1))
 
 # -----------------------------------------------------------------------------
+# Intagli di secondo livello: foglie, trafori, anime incatenate e meccanica
+# -----------------------------------------------------------------------------
+use_collection("06 • Intagli | trafori e bassorilievi")
+
+
+def add_carved_leaf(name, base, direction, length, width, material, parent=None, collection=None):
+    """Foglia di acanto/spina, ricurva e lobata, con costola e venature vere."""
+    axis = Vector((direction[0], 0, direction[1])).normalized()
+    cross = Vector((axis.z, 0, -axis.x))
+    origin = Vector(base)
+    profile = [0.06, 0.62, 0.42, 1.0, 0.71, 0.35, 0.018]
+    verts, faces, vein = [], [], []
+    for i, w in enumerate(profile):
+        t = i / (len(profile) - 1)
+        center = origin + axis * (length * t) + cross * (length * 0.12 * t ** 3)
+        center.y -= length * (0.22 * math.sin(t * math.pi) + 0.08 * t)
+        vein.append(tuple(center - Vector((0, 0.008, 0))))
+        for j in range(5):
+            u = (j - 2) / 2
+            q = center + cross * (u * width * w * 0.5)
+            q.y += width * 0.22 * abs(u) ** 1.5 * math.sin(t * math.pi)
+            verts.append(tuple(q))
+        if i:
+            for j in range(4):
+                faces.append(((i - 1) * 5 + j, (i - 1) * 5 + j + 1, i * 5 + j + 1, i * 5 + j))
+    mesh = bpy.data.meshes.new(name + " | foglia lobata")
+    mesh.from_pydata(verts, [], faces)
+    mesh.materials.append(material)
+    mesh.update()
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    obj = mesh_object(name, mesh, parent=parent, collection=collection)
+    thick = obj.modifiers.new("Spessore dell'intaglio", "SOLIDIFY")
+    thick.thickness = 0.018
+    thick.offset = 0
+    add_tapered_tube(name + " | nervatura", vein,
+                     [0.018 * (1 - i / 7) for i in range(7)], material, sides=8,
+                     parent=parent, collection=collection)
+    for i in (2, 3, 4):
+        for side in (-1, 1):
+            start = Vector(vein[i - 1])
+            end = Vector(verts[i * 5 + (0 if side < 0 else 4)]) - Vector((0, 0.006, 0))
+            mid = (start + end) / 2 - Vector((0, 0.007, 0))
+            add_curve(name + f" | venatura {i}.{side:+d}", [tuple(start), tuple(mid), tuple(end)],
+                      0.0055, material, resolution=1, parent=parent, collection=collection)
+    return obj
+
+
+def add_quatrefoil(name, center, radius, material, tube=0.027, parent=None):
+    x, y, z = center
+    pts = []
+    for j in range(129):
+        a = math.tau * j / 128
+        r = radius * (0.84 + 0.16 * math.cos(4 * a))
+        pts.append((x + r * math.cos(a), y, z + r * math.sin(a)))
+    return add_curve(name, pts, tube, material, cyclic=True, parent=parent, resolution=3)
+
+
+def add_damned_relief(name, x, y, z, size, material, parent=None, pleading=True):
+    """Figura umana in bassorilievo: volto, gabbia toracica, mani e arti piegati."""
+    def p(dx, dy, dz):
+        return (x + dx * size, y + dy * size, z + dz * size)
+
+    # Testa inclinata e allungata: diversa dai mascheroni cornuti.
+    head = add_uv_sphere(name + " | volto emaciato", p(0.022, -0.018, 0.29),
+                         (0.105 * size, 0.075 * size, 0.143 * size), material,
+                         segments=28, rings=18, parent=parent)
+    head.rotation_euler[1] = -0.14
+    for side in (-1, 1):
+        add_uv_sphere(name + f" | occhio infossato {side:+d}", p(side * 0.038, -0.089, 0.315),
+                      (0.024 * size, 0.012 * size, 0.025 * size), void_mat,
+                      segments=16, rings=10, parent=parent)
+        add_tapered_tube(name + f" | zigomo del volto {side:+d}",
+                         [p(side * 0.087, -0.065, 0.302), p(side * 0.062, -0.086, 0.258),
+                          p(side * 0.034, -0.086, 0.244)],
+                         [0.018 * size, 0.015 * size, 0.007 * size], material, sides=8, parent=parent)
+    add_uv_sphere(name + " | bocca del lamento", p(0.013, -0.092, 0.246),
+                  (0.031 * size, 0.015 * size, 0.038 * size), void_mat,
+                  segments=16, rings=12, parent=parent)
+    add_tapered_tube(name + " | collo e sterno", [p(0, 0, 0.195), p(0, -0.015, 0.09), p(0, -0.008, -0.13)],
+                     [0.031 * size, 0.023 * size, 0.012 * size], material, parent=parent)
+    add_uv_sphere(name + " | torso scavato", p(0, 0.018, -0.04),
+                  (0.14 * size, 0.064 * size, 0.195 * size), stone_shadow,
+                  segments=24, rings=16, parent=parent)
+    for i in range(5):
+        rz = 0.12 - i * 0.047
+        spread = (0.144 - abs(i - 1.5) * 0.020)
+        for side in (-1, 1):
+            ribs = [p(0, -0.042, rz), p(side * spread * 0.72, -0.067, rz + 0.018),
+                    p(side * spread, -0.028, rz - 0.022), p(side * spread * 0.79, 0.014, rz - 0.047)]
+            add_tapered_tube(name + f" | costola {i+1}.{side:+d}", ribs,
+                             [0.012 * size, 0.014 * size, 0.012 * size, 0.006 * size], material,
+                             sides=8, parent=parent)
+    add_curve(name + " | clavicole", [p(-0.155, -0.018, 0.16), p(-0.064, -0.055, 0.175),
+                                     p(0, -0.045, 0.13), p(0.064, -0.055, 0.175), p(0.155, -0.018, 0.16)],
+              0.016 * size, material, parent=parent)
+    for side in (-1, 1):
+        shoulder = p(side * 0.155, 0, 0.145)
+        elbow = p(side * 0.26, -0.014, 0.03 if pleading else -0.085)
+        wrist = p(side * 0.22, -0.035, 0.265 if pleading else -0.16)
+        add_tapered_tube(name + f" | braccio {side:+d}", [shoulder, elbow, wrist],
+                         [0.029 * size, 0.021 * size, 0.016 * size], material, parent=parent)
+        add_uv_sphere(name + f" | mano {side:+d}", wrist,
+                      (0.041 * size, 0.018 * size, 0.058 * size), material,
+                      segments=16, rings=12, parent=parent)
+        for finger in range(4):
+            dx = side * 0.22 + (finger - 1.5) * 0.016
+            hand_z = 0.295 if pleading else -0.19
+            pts = [p(dx, -0.042, hand_z), p(dx - side * 0.009, -0.065, hand_z + 0.075),
+                   p(dx - side * 0.025, -0.059, hand_z + 0.102)]
+            add_tapered_tube(name + f" | dito {side:+d}.{finger+1}", pts,
+                             [0.008 * size, 0.006 * size, 0.003 * size], material, sides=6, parent=parent)
+        add_tapered_tube(name + f" | bacino e gamba {side:+d}",
+                         [p(side * 0.082, 0.012, -0.20), p(side * 0.12, -0.047, -0.34),
+                          p(side * 0.065, -0.009, -0.55)],
+                         [0.041 * size, 0.028 * size, 0.015 * size], material, parent=parent)
+        add_uv_sphere(name + f" | ginocchio {side:+d}", p(side * 0.12, -0.055, -0.34),
+                      (0.033 * size, 0.025 * size, 0.036 * size), material,
+                      segments=16, rings=10, parent=parent)
+        add_uv_sphere(name + f" | piede {side:+d}", p(side * 0.052, -0.021, -0.565),
+                      (0.064 * size, 0.025 * size, 0.025 * size), material,
+                      segments=16, rings=10, parent=parent)
+
+
+# La muratura riempie i pennacchi esterni fino alla cimasa: niente architrave
+# sospeso o lastre rettangolari nel vuoto. I bordi sono ritagliati sul profilo.
+def outer_x_at(z):
+    if z >= ORD3_OUT[2]:
+        return 0.0
+    if z <= ORD3_OUT[1]:
+        return ORD3_OUT[0]
+    lo, hi = 0.0, 1.0
+    for _ in range(32):
+        mid = (lo + hi) / 2
+        if arch_point(mid, *ORD3_OUT, 1)[1] < z:
+            lo = mid
+        else:
+            hi = mid
+    return arch_point((lo + hi) / 2, *ORD3_OUT, 1)[0] + 0.08
+
+
+def clip_vertical(poly, x, greater):
+    result = []
+    for a, b in zip(poly, poly[1:] + poly[:1]):
+        ina = a[0] >= x if greater else a[0] <= x
+        inb = b[0] >= x if greater else b[0] <= x
+        if ina:
+            result.append(a)
+        if ina != inb:
+            q = (x - a[0]) / (b[0] - a[0])
+            result.append((x, a[1] + q * (b[1] - a[1])))
+    return result
+
+
+for side in (-1, 1):
+    for row in range(13):
+        z0 = 5.3 + row * 0.67
+        z1 = min(z0 + 0.643, 14.04)
+        inner0, inner1 = outer_x_at(z0), outer_x_at(z1)
+        for k in range(7):
+            x0 = k * 1.08 - (0.48 if row % 2 else 0)
+            x1 = x0 + 1.051
+            poly = [(inner0, z0), (6.56, z0), (6.56, z1), (inner1, z1)]
+            poly = clip_vertical(clip_vertical(poly, x0, True), x1, False)
+            if len(poly) < 3:
+                continue
+            area = abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(poly, poly[1:] + poly[:1]))) / 2
+            if area < 0.012:
+                continue
+            mat = stable_rng(f"pennacchio {side} {row} {k}").choice((stone, stone, stone_light, stone_shadow))
+            add_extruded_polygon(f"Pennacchio murato {side:+d} | concio {row+1:02d}.{k+1}",
+                                 [(side * x, z) for x, z in poly], -1.115, -0.56, mat, bevel=0.025)
+add_box("Collegamento del coronamento | cimasa intagliata", (0, -0.89, 13.86),
+        (13.0, 0.47, 0.40), stone, 0.045)
+# Riporta le arcature cieche davanti alla nuova muratura, ma dietro gli ordini.
+for obj in list(bpy.data.objects):
+    if obj.name.startswith(("Nicchia cieca", "Cornice della nicchia")):
+        obj.location.y -= 0.27
+
+# Crockets di pietra su ogni fianco del grande arco, omettendo la lacuna.
+for side in (-1, 1):
+    for i in range(20):
+        t = 0.035 + i * 0.047
+        if side < 0 and 7 / 15 < t < 8 / 15:
+            continue
+        x, z = arch_point(t, *ORD3_OUT, side)
+        a, b = Vector(arch_point(max(0, t - 0.01), *ORD3_OUT, side)), Vector(arch_point(min(1, t + 0.01), *ORD3_OUT, side))
+        tangent = (b - a).normalized()
+        outward = (side * abs(tangent.y), abs(tangent.x))
+        add_carved_leaf(f"Uncino d'acanto dell'arco {side:+d}.{i+1:02d}", (x, -1.67, z),
+                        outward, 0.37 + 0.035 * math.sin(i * 2.3), 0.25, stone_light)
+    # Fascia di denti di cane nel primo ordine, fra le due modanature.
+    for i in range(34):
+        t = (i + 0.5) / 34
+        a = Vector(arch_point(t, INNER_A, INNER_SPRING, INNER_TOP, side))
+        b = Vector(arch_point(t, OUTER_A, OUTER_SPRING, OUTER_TOP, side))
+        center = a.lerp(b, 0.56)
+        tangent = Vector(arch_point(min(1, t + 0.002), OUTER_A, OUTER_SPRING, OUTER_TOP, side)) - b
+        tangent.normalize()
+        cross = Vector((-tangent.y, tangent.x))
+        points = [center + tangent * 0.075, center + cross * 0.058,
+                  center - tangent * 0.075, center - cross * 0.058]
+        mesh = bpy.data.meshes.new(f"Dente di cane {side}.{i} | piramide")
+        mesh.from_pydata([(p.x, -0.988, p.y) for p in points] + [(center.x, -1.10, center.y)], [],
+                         [(0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4), (3, 2, 1, 0)])
+        mesh.materials.append(stone_light if i % 3 else bronze)
+        mesh.update()
+        mesh_object(f"Dente di cane scolpito {side:+d}.{i+1:02d}", mesh)
+    # Fiori/borchie scolpiti nel secondo archivolto, più grandi del grit.
+    for i in range(12):
+        t = (i + 0.5) / 12
+        a, b = Vector(arch_point(t, *ORD2_IN, side)), Vector(arch_point(t, *ORD2_OUT, side))
+        q = a.lerp(b, 0.55)
+        add_quatrefoil(f"Quadrilobo dell'archivolto {side:+d}.{i+1}", (q.x, -1.37, q.y),
+                        0.145, bronze, tube=0.017)
+        add_uv_sphere(f"Borchia dell'archivolto {side:+d}.{i+1}", (q.x, -1.40, q.y),
+                      (0.056, 0.037, 0.065), bone_shadow, segments=20, rings=12)
+    # Foglie a cestello sui capitelli, anelli al piede delle colonnette.
+    for i in range(5):
+        xx = side * 4.55 + (i - 2) * 0.235
+        add_carved_leaf(f"Acanto del capitello {side:+d}.{i+1}", (xx, -1.38, 4.73),
+                        ((i - 2) * 0.10, 1), 0.43, 0.26, stone_light)
+    for dx in (-0.40, 0.40):
+        for zc, radius in ((0.98, 0.28), (1.10, 0.30), (4.83, 0.28)):
+            add_torus(f"Collarino scolpito della colonna {side:+d}.{dx}.{zc}",
+                      (side * 4.55 + dx, -0.95, zc), radius, 0.033, stone_light)
+
+# Medaglioni ai lati della corona; facce umane, non un'altra coppia di occhi accesi.
+for side in (-1, 1):
+    x, z = side * 3.80, 12.85
+    add_uv_sphere(f"Medaglione delle anime {side:+d} | ombra", (x, -1.15, z),
+                  (0.49, 0.035, 0.53), void_mat, segments=36, rings=20)
+    add_quatrefoil(f"Medaglione delle anime {side:+d} | cornice", (x, -1.24, z),
+                    0.52, stone_light, tube=0.058)
+    add_quatrefoil(f"Medaglione delle anime {side:+d} | filetto", (x, -1.30, z),
+                    0.44, bronze, tube=0.014)
+    add_damned_relief(f"Anima del coronamento {side:+d}", x, -1.24, z + 0.02, 0.75,
+                     bone_shadow, pleading=True)
+
+# Piccole anime nella galleria cieca: qualche nicchia è vuota, alcune spezzate.
+for row, zc in enumerate((9.90, 11.15)):
+    for k in (-3, -1, 1, 3):
+        xx = k * 1.08 + (0.26 if row else -0.18)
+        add_damned_relief(f"Anima nella nicchia {row+1}.{k:+d}", xx, -1.21, zc - 0.10,
+                         0.61, stone_light, pleading=(k % 3 != 0))
+        for s in (-1, 1):
+            add_curve(f"Ferro della nicchia {row+1}.{k:+d}.{s:+d}",
+                      [(xx + s * 0.29, -1.26, zc - 0.55), (xx + s * 0.29, -1.26, zc + 0.30)],
+                      0.013, iron)
+
+# Torri: doppie lancette, trilobi, cornicette e gargoyle scolpiti.
+for side, spec in TOWERS.items():
+    for tier, (base, spring, top) in enumerate(((5.66, 7.52, 8.56), (9.81, 11.45, 12.25))):
+        x = side * (6.75 + spec["lean"] * spring * 2.2)
+        outline = niche_outline(x, spring, 0.47, spring - base, top - spring)
+        add_arch_fill(f"Lancetta della torre {side:+d}.{tier+1} | incasso", outline, -1.837, void_mat)
+        left = arch_points(0.49, spring, top, -1, steps=32)
+        right = arch_points(0.49, spring, top, 1, steps=32)
+        pts = [(x - 0.49, -1.915, base)] + [(x + px, -1.915, pz) for px, pz in left]
+        pts += [(x + px, -1.915, pz) for px, pz in reversed(right)][1:] + [(x + 0.49, -1.915, base)]
+        add_curve(f"Lancetta della torre {side:+d}.{tier+1} | ogiva", pts, 0.045, stone_light, resolution=3)
+        add_box(f"Davanzale della torre {side:+d}.{tier+1}", (x, -1.92, base),
+                (1.02, 0.23, 0.13), stone_light, 0.027)
+        for s in (-1, 1):
+            cx = x + s * 0.22
+            pts = [(cx - 0.18, -1.905, base + 0.10)]
+            pts += [(cx + px, -1.905, pz) for px, pz in arch_points(0.18, spring - 0.15, spring + 0.32, -1, steps=24)]
+            pts += [(cx + px, -1.905, pz) for px, pz in reversed(arch_points(0.18, spring - 0.15, spring + 0.32, 1, steps=24))][1:]
+            pts += [(cx + 0.18, -1.905, base + 0.10)]
+            add_curve(f"Traforo binato della torre {side:+d}.{tier+1}.{s:+d}", pts, 0.022, bronze, resolution=3)
+        add_rod(f"Montante della torre {side:+d}.{tier+1}", (x, -1.945, base + 0.08),
+                (x, -1.945, spring + 0.22), 0.038, stone_light, vertices=16)
+        add_quatrefoil(f"Trilobo della torre {side:+d}.{tier+1}", (x, -1.943, spring + 0.54),
+                        0.16, stone_light, tube=0.025)
+    x = side * (6.75 + spec["lean"] * 9.3 * 2.2)
+    add_box(f"Mensola del gargoyle {side:+d}", (x, -1.95, 9.34), (0.85, 0.62, 0.19), stone_light, 0.04)
+    add_uv_sphere(f"Gargoyle {side:+d} | collo", (x, -2.17, 9.51), (0.19, 0.36, 0.17), stone,
+                  segments=24, rings=16)
+    add_skull_relief(f"Gargoyle della torre {side:+d}", x, -2.43, 9.53, 0.61,
+                     skull_mat=stone_light, glow=False)
+    for s in (-1, 1):
+        add_carved_leaf(f"Gargoyle {side:+d} | ala {s:+d}", (x + s * 0.15, -2.30, 9.46),
+                        (s * 0.72, 0.65), 0.38, 0.24, stone)
+
+# Rosone della corona: sei petali traforati, raccordi trilobati e vetro cremisi.
+for obj in list(bpy.data.objects):
+    if obj.name.startswith(("Raggio della rosa", "Anello interno della rosa", "Mozzo della rosa")):
+        bpy.data.objects.remove(obj, do_unlink=True)
+glass = principled_material("Vetro del rosone | cremisi scheggiato", (0.075, 0.0035, 0.009, 1),
+                             metallic=0.15, roughness=0.22, noise_scale=7, bump_strength=0.1,
+                             bump_distance=0.003, color_low=(0.005, 0.0005, 0.002, 1),
+                             color_high=(0.13, 0.008, 0.015, 1))
+bsdf = next(n for n in glass.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
+bsdf.inputs["Coat Weight"].default_value = 0.35
+bsdf.inputs["Emission Color"].default_value = (0.08, 0.001, 0.006, 1)
+bsdf.inputs["Emission Strength"].default_value = 0.45
+for i in range(6):
+    theta = i * math.tau / 6
+    petal = []
+    for j in range(65):
+        a = math.tau * j / 64
+        radial = 0.51 + 0.365 * math.cos(a)
+        lateral = 0.215 * math.sin(a) * (0.80 + 0.20 * abs(math.sin(a)))
+        petal.append((-0.15 + math.cos(theta) * radial - math.sin(theta) * lateral,
+                      -0.565, 16.10 + math.sin(theta) * radial + math.cos(theta) * lateral))
+    add_curve(f"Petalo traforato del rosone {i+1}", petal, 0.041, stone_light, cyclic=True, resolution=3)
+    add_curve(f"Filetto del petalo {i+1}", [(x, y - 0.031, z) for x, y, z in petal],
+              0.011, gold, cyclic=True, resolution=2)
+    add_arch_fill(f"Vetro del petalo {i+1}", [(x, z) for x, y, z in petal[:-1]], -0.49, glass)
+    theta += math.pi / 6
+    add_quatrefoil(f"Quadrilobo esterno del rosone {i+1}",
+                    (-0.15 + math.cos(theta) * 0.90, -0.57, 16.10 + math.sin(theta) * 0.90),
+                    0.11, bronze, tube=0.018)
+add_torus("Rosone | anello cordonato", (-0.15, -0.57, 16.10), 1.10, 0.027, bronze,
+          rotation=(math.pi / 2, 0, 0), major_segments=96, minor_segments=10)
+add_skull_relief("Rosone | teschio centrale scolpito", -0.15, -0.62, 16.10, 0.30,
+                 skull_mat=bone_shadow, glow=False)
+# Il mascherone della chiave di volta diventa un vero cranio cavo.
+for obj in list(bpy.data.objects):
+    if obj.name.startswith(("Maschera della chiave di volta", "Occhio della chiave di volta")):
+        bpy.data.objects.remove(obj, do_unlink=True)
+add_skull_relief("Chiave di volta | cranio scolpito", 0, -1.10, 9.02, 0.80, skull_mat=bone)
+
+# Spine e foglie lungo le rampe spezzate del frontone, senza ricucirne il vuoto.
+for side, end_z in ((-1, 17.50), (1, 17.03)):
+    for i in range(7):
+        t = (i + 0.7) / 8
+        x = side * (6.05 - t * 4.65)
+        z = 15.97 + t * (end_z - 15.97)
+        add_carved_leaf(f"Acanto del frontone {side:+d}.{i+1}", (x, -0.83, z),
+                        (side * 0.25, 1), 0.22, 0.18, stone_light)
+# Fascia di incatenamento sotto la sentenza, leggibile in luce radente.
+for i in range(26):
+    x = -6.15 + i * 0.49
+    add_quatrefoil(f"Fregio sotto la sentenza {i+1:02d}", (x, -1.18, 13.77),
+                    0.12, bronze, tube=0.016)
+
+# Tutti i nuovi dettagli dei battenti sono figli degli stessi cardini apribili.
+for side in (-1, 1):
+    root = bpy.data.objects["Cardine del battente sinistro" if side < 0 else "Cardine del battente destro"]
+    leaf = -side
+    label = f"Intaglio del battente {side:+d}"
+    add_damned_relief(label + " | anima incatenata", leaf * 1.77, -0.455, 6.44, 1.30,
+                     bronze, parent=root)
+    # Doppio traforo nel campo ogivale: profilo, montante e rami fiammeggianti.
+    trim = []
+    for i in range(57):
+        t = 0.09 + i / 56 * 0.82
+        px, pz = arch_point(t, INNER_A, INNER_SPRING, INNER_TOP, side)
+        trim.append((leaf * (INNER_A - abs(px) + 0.12), -0.447, pz - 0.24))
+    trim += [(leaf * 2.43, -0.447, 5.78), (leaf * 0.41, -0.447, 5.78)]
+    add_curve(label + " | cornice fiammeggiante", trim, 0.032, bronze, cyclic=True,
+              resolution=3, parent=root)
+    add_curve(label + " | costola centrale", [(leaf * 2.39, -0.47, 5.77),
+              (leaf * 2.40, -0.47, 6.65), (leaf * 2.45, -0.47, 7.63), (leaf * 2.45, -0.47, 8.35)],
+              0.021, gold, parent=root)
+    for i in range(4):
+        cx = 1.00 + i * 0.33
+        cz = 5.96 + i * 0.44
+        curl = []
+        for j in range(49):
+            a = j / 48 * math.tau * 1.20
+            r = 0.19 * (1 - j / 60)
+            curl.append((leaf * (cx + math.cos(a) * r), -0.48, cz + math.sin(a) * r))
+        add_curve(label + f" | viticcio forgiato {i+1}", curl, 0.017, bronze, parent=root)
+        add_carved_leaf(label + f" | foglia del traforo {i+1}", (leaf * (cx + 0.02), -0.495, cz + 0.10),
+                        (leaf * 0.30, 1), 0.18, 0.13, gold, parent=root)
+    # Riccioli e rune nei pannelli inferiori.
+    for zc in (1.66, 4.43):
+        for s in (-1, 1):
+            pts = []
+            for j in range(49):
+                a = j / 48 * math.tau * 1.5
+                r = 0.205 * (1 - j / 60)
+                pts.append((leaf * 1.31 + s * 0.47 + math.cos(a) * r, -0.429, zc + math.sin(a) * r))
+            add_curve(label + f" | ricciolo {zc}.{s:+d}", pts, 0.016, bronze, parent=root)
+    # Serratura a chiave antica e chiavistello, con staffe e perni distinti.
+    lx = leaf * 2.26
+    add_box(label + " | piastra della serratura", (lx, -0.525, 2.78),
+            (0.26, 0.10, 0.40), iron, 0.038, parent=root)
+    key = add_cylinder(label + " | foro circolare della chiave", (lx, -0.583, 2.84),
+                       0.041, 0.008, void_mat, vertices=24, parent=root)
+    key.rotation_euler[0] = math.pi / 2
+    add_extruded_polygon(label + " | fessura della chiave", [(lx - 0.025, 2.82), (lx + 0.025, 2.82),
+                          (lx + 0.037, 2.70), (lx - 0.037, 2.70)], -0.590, -0.584, void_mat, parent=root)
+    for offset in (-0.40, 0.12):
+        add_box(label + f" | staffa del chiavistello {offset}", (lx + leaf * offset, -0.60, 2.42),
+                (0.10, 0.11, 0.22), iron, 0.022, parent=root)
+    add_rod(label + " | chiavistello forgiato", (lx - leaf * 0.55, -0.66, 2.42),
+            (lx + leaf * 0.23, -0.66, 2.42), 0.031, bronze, parent=root)
+    for h, zc in enumerate((1.40, 3.52, 5.70)):
+        for j in (-2, -1, 1, 2):
+            add_torus(label + f" | nocca del cardine {h+1}.{j}", (leaf * 0.025, -0.53, zc + j * 0.15),
+                      0.11, 0.018, iron, parent=root, major_segments=32)
+        add_cylinder(label + f" | perno del cardine {h+1}", (leaf * 0.025, -0.53, zc),
+                     0.038, 0.93, gold, vertices=20, bevel=0.009, parent=root)
+        for dz in (-0.47, 0.47):
+            add_uv_sphere(label + f" | testa del perno {h+1}.{dz}", (leaf * 0.025, -0.53, zc + dz),
+                          (0.082, 0.082, 0.052), bronze, segments=20, rings=12, parent=root)
+    # Chiodi ottagonali, ciascuno con rondella: il ferro non sembra plastica.
+    for obj in list(root.children):
+        if obj.name.startswith("Ribattino "):
+            x, y, z = obj.location
+            bpy.data.objects.remove(obj, do_unlink=True)
+            rivet = add_cylinder(label + f" | chiodo forgiato {x:.3f}.{z:.3f}", (x, y - 0.008, z),
+                                 0.049, 0.035, bronze, vertices=8, bevel=0.006, parent=root)
+            rivet.rotation_euler[0] = math.pi / 2
+            add_torus(label + f" | rondella {x:.3f}.{z:.3f}", (x, y + 0.008, z), 0.058, 0.009, iron,
+                      rotation=(math.pi / 2, 0, 0), parent=root, major_segments=24, minor_segments=8)
+
+# Detriti stratificati, schegge sottili e ossa alla base delle torri, senza
+# coprire il percorso o aggiungere punti luminosi a ogni superficie.
+use_collection("04 • Oltretomba | fuoco, lava, catene")
+rng = random.Random(819)
+for side in (-1, 1):
+    for i in range(28):
+        x = side * rng.uniform(5.7, 8.2)
+        y = rng.uniform(-3.65, -1.4)
+        sx, sy, sz = rng.uniform(0.07, 0.27), rng.uniform(0.06, 0.20), rng.uniform(0.04, 0.15)
+        obj = add_ico(f"Scheggia di basalto {side:+d}.{i+1:02d}", (x, y, sz * 0.6), (sx, sy, sz),
+                      rng.choice((stone, stone_light, stone_dark)), subdivisions=1)
+        obj.rotation_euler = (rng.uniform(-0.3, 0.3), rng.uniform(-0.3, 0.3), rng.uniform(0, math.tau))
+    for i in range(4):
+        x, y = side * rng.uniform(5.6, 7.3), rng.uniform(-3.9, -2.2)
+        add_tapered_tube(f"Osso tra le macerie {side:+d}.{i+1}", [(x - 0.12, y, 0.16),
+                          (x, y + 0.045, 0.18), (x + 0.17, y + 0.08, 0.16)],
+                          [0.041, 0.025, 0.039], bone_shadow, sides=10)
+
+
+# -----------------------------------------------------------------------------
 # Backdrop, infernal atmosphere, camera and cinematic light
 # -----------------------------------------------------------------------------
 use_collection("04 • Oltretomba | fuoco, lava, catene")
@@ -2296,6 +2996,9 @@ add_area_light("Luce di taglio | blu abissale", (3.5,3.5,15.0), (0,0,8.0),
                2800, (0.15,0.28,1.0), 7.0)
 add_area_light("Luce alta | pietra e frontone", (-1.0,1.0,20.0), (0,0,10.0),
                1250, (0.72,0.54,0.35), 6.0)
+# Riempimento neutro tenue: svela gli intagli del ferro, senza lavare le ombre.
+add_area_light("Rimbalzo tenue | lettura degli intagli", (0, -12.5, 10.0), (0, -0.8, 7.1),
+               600, (0.77, 0.73, 0.67), 6.0)
 
 for name, location, energy, color, radius in [
     ("Cuore della soglia", (0,1.45,3.2), 850, (1.0,0.075,0.018), 1.9),
@@ -2326,18 +3029,39 @@ cam_data.dof.focus_distance = (target-Vector(cam.location)).length
 cam_data.dof.aperture_fstop = 9.0
 scene.camera = cam
 
+# Camere di ispezione pronte nel .blend, senza modificare la composizione principale.
+def detail_camera(name, location, target, lens):
+    data = bpy.data.cameras.new(name)
+    obj = bpy.data.objects.new(name, data)
+    ACTIVE.objects.link(obj)
+    obj.location = location
+    obj.rotation_euler = (Vector(target) - obj.location).to_track_quat("-Z", "Y").to_euler()
+    data.lens = lens
+    data.dof.use_dof = False
+    obj["Uso"] = "Seleziona questa camera e premi Ctrl+Numpad 0 per inquadrarne i dettagli."
+    return obj
+
+door_camera = detail_camera("Camera | dettaglio battenti", (4.0, -13.5, 5.45), (0, -0.6, 4.75), 62)
+detail_camera("Camera | dettaglio corona e trafori", (2.8, -17.0, 14.1), (0, -0.6, 13.9), 70)
+detail_camera("Camera | dettaglio custode", (8.3, -8.1, 4.0), (5.6, -1.65, 3.05), 62)
+
 # Cycles CPU is deterministic and works without a GPU; denoising preserves small carvings.
 scene.render.engine = "CYCLES"
 scene.cycles.device = "CPU"
-scene.cycles.samples = 48
-scene.cycles.preview_samples = 16
+scene.cycles.samples = FINAL_SAMPLES
+scene.cycles.preview_samples = 24
+scene.cycles.use_adaptive_sampling = True
+scene.cycles.adaptive_threshold = 0.015
+scene.cycles.adaptive_min_samples = 32
+scene.cycles.max_bounces = 8
+scene.cycles.diffuse_bounces = 3
+scene.cycles.glossy_bounces = 4
 scene.cycles.use_denoising = True
 # Prefiltro accurato: con il micro-dettaglio dei materiali il filtro veloce
 # spiana i rilievi fini proprio dove la roccia dovrebbe essere più ruvida.
 scene.cycles.denoising_prefilter = "ACCURATE"
 scene.cycles.denoiser = "OPENIMAGEDENOISE"
-scene.render.resolution_x = 1500
-scene.render.resolution_y = 1740
+scene.render.resolution_x, scene.render.resolution_y = FINAL_SIZE
 scene.render.resolution_percentage = 100
 scene.render.image_settings.file_format = "PNG"
 scene.render.image_settings.color_mode = "RGBA"
@@ -2362,8 +3086,14 @@ rl.location = (-300,0)
 glow = nt.nodes.new("CompositorNodeGlare")
 glow.glare_type = "FOG_GLOW"
 glow.quality = "HIGH"
-glow.threshold = 1.35
-glow.size = 7
+# Blender 4.5 espone soglia/dimensione come socket, non proprietà del nodo.
+if "Threshold" in glow.inputs:
+    glow.inputs["Threshold"].default_value = 1.35
+    glow.inputs["Size"].default_value = 0.14
+    glow.inputs["Strength"].default_value = 0.45
+else:
+    glow.threshold = 1.35
+    glow.size = 7
 glow.location = (0,0)
 comp = nt.nodes.new("CompositorNodeComposite")
 comp.location = (230,0)
@@ -2373,7 +3103,11 @@ nt.links.new(glow.outputs["Image"],comp.inputs["Image"])
 # Metadata for anyone inspecting the .blend.
 scene["Opera"] = "La Porta dell'Inferno — interpretazione originale da Inferno, Canto III"
 scene["Iscrizione"] = "Lasciate ogni speranza, voi ch'entrate"
-scene["Nota"] = "Modello procedurale: architettura, battenti, rilievi e materiali sono modificabili."
+scene["Nota"] = "Modello procedurale dettagliato: geometria, battenti apribili, intagli e shader modificabili."
+scene["Edizione"] = "II • Intagli, sculture cave e muratura erosa"
+scene["Dettagli modellati"] = "Orbite/naso scavati, 16 denti per cranio, corna rastremate, acanto, trafori, anime in rilievo, meccanica dei cardini, conci scheggiati."
+scene["Seed"] = 73
+scene["Camere di dettaglio"] = "Battenti • Corona e trafori • Custode"
 scene["Dimensioni indicative"] = "circa 15,0 x 18,5 x 6,0 unità Blender"
 
 # Make the project pleasant to inspect immediately after opening in Blender.
@@ -2402,19 +3136,71 @@ bpy.ops.object.select_all(action="DESELECT")
 bpy.context.view_layer.objects.active = None
 bpy.context.scene.cursor.location = (0,0,0)
 
-# Save a full-quality Blender project, then render a lightweight preview image.
-bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
-# L'anteprima usa lo stesso numero di campioni del render finale: con meno
-# campioni il denoiser è costretto a spianare il micro-dettaglio dei materiali.
-scene.render.resolution_percentage = 68
-scene.cycles.samples = 48
-scene.render.filepath = PREVIEW_PATH
-bpy.ops.render.render(write_still=True)
-# Restore production settings and save once more so opening the project is ready for a final render.
-scene.render.resolution_percentage = 100
-scene.cycles.samples = 48
-scene.render.filepath = PREVIEW_PATH
-bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
+# Elimina solo le mesh di costruzione rimaste senza oggetti; nessun asset esterno.
+for mesh in list(bpy.data.meshes):
+    if mesh.users == 0:
+        bpy.data.meshes.remove(mesh)
+
+scene["Oggetti"] = len(bpy.data.objects)
+scene["Materiali"] = len(bpy.data.materials)
+scene["Vertici mesh (senza istanze)"] = sum(len(m.vertices) for m in bpy.data.meshes)
+readme = bpy.data.texts.new("LEGGIMI • Porta dell'Inferno dettagliata")
+readme.write("""LA PORTA DELL'INFERNO • EDIZIONE II
+
+F12: render principale (2000 × 2320, Cycles, 128 campioni/adaptive).
+Le tre camere 'dettaglio' permettono di esaminare battenti, corona e custode.
+Seleziona la camera desiderata nell'Outliner, poi Ctrl+Numpad 0.
+
+BATTENTI APRIBILI
+Ruota su Z gli empty 'Cardine del battente sinistro/destro'.
+Anche anime in rilievo, serrature, trafori e rondelle seguono il cardine.
+
+MODELLAZIONE, NON SOLO TEXTURE
+Conci tagliati con vere facce di frattura. Cranio con orbite e naso scavati.
+Corna e dita rastremate, manti con pieghe nel mesh, ali ondulate e spesse.
+Rosone petaliforme, lancette binate, acanto e denti di cane scolpiti.
+Sei collezioni separano architettura, battenti, sculture, inferi, scena e intagli.
+Tutti gli shader sono procedurali. Nessuna texture o libreria da scaricare.
+
+Rigenera con porta_inferno.py. Usa -- --no-render per il solo modello.
+Il codice del generatore è incluso nel blocco di testo 'porta_inferno.py'.
+""")
+if os.path.isfile(os.path.join(ROOT, "porta_inferno.py")):
+    source = bpy.data.texts.new("porta_inferno.py")
+    with open(os.path.join(ROOT, "porta_inferno.py"), encoding="utf-8") as f:
+        source.write(f.read())
+
+# Salva il modello PRIMA del render; ripristina sempre camera e qualità finale.
+def save_project():
+    scene.camera = cam
+    scene.render.resolution_x, scene.render.resolution_y = FINAL_SIZE
+    scene.render.resolution_percentage = 100
+    scene.cycles.samples = FINAL_SAMPLES
+    scene.cycles.adaptive_threshold = 0.015
+    scene.cycles.adaptive_min_samples = 32
+    # Path relativo al .blend: il progetto è portabile, anche generando altrove.
+    scene.render.filepath = "//porta_dell_inferno_preview.png"
+    bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH, compress=True)
+
+save_project()
+if not OPTS.no_render:
+    try:
+        scene.render.resolution_x = OPTS.preview_width
+        scene.render.resolution_y = round(OPTS.preview_width * FINAL_SIZE[1] / FINAL_SIZE[0])
+        scene.cycles.samples = OPTS.preview_samples
+        scene.cycles.adaptive_threshold = 0.025
+        scene.cycles.adaptive_min_samples = min(16, OPTS.preview_samples)
+        scene.render.filepath = PREVIEW_PATH
+        bpy.ops.render.render(write_still=True)
+        if OPTS.detail_preview:
+            scene.camera = door_camera
+            scene.render.resolution_y = scene.render.resolution_x
+            scene.render.filepath = DETAIL_PATH
+            bpy.ops.render.render(write_still=True)
+    finally:
+        save_project()
+    print("Anteprima:", PREVIEW_PATH)
+    if OPTS.detail_preview:
+        print("Dettaglio:", DETAIL_PATH)
 print("Creato:", BLEND_PATH)
-print("Anteprima:", PREVIEW_PATH)
 print("Oggetti:", len(bpy.data.objects), " | Materiali:", len(bpy.data.materials))

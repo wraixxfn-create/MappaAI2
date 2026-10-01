@@ -1,0 +1,8 @@
+# Blender backup files; the current .blend and final previews are deliverables.
+*.blend[0-9]*
+*.blend@
+# Regeneration / validation scratch files
+.cache/
+__pycache__/
+*.pyc
+*.log
