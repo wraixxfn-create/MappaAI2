@@ -51,11 +51,1079 @@ def link_object(obj, collection=None):
     return obj
 
 # -----------------------------------------------------------------------------
-# Procedural materials
+# Materiali procedurali: pietra vulcanica, roccia carbonizzata, metallo annerito
+#
+# Ogni superficie nasce dalla somma di famiglie di dettaglio campionate a scale
+# molto diverse (da ~3 unità fino al millimetro) e di maschere di degrado
+# indipendenti:
+#   • crepe profonde e craquelure capillare  (Voronoi "distance to edge")
+#   • vaiolature vulcaniche, erosione e scheggiature concentrate sugli spigoli
+#   • cenere depositata sulle facce esposte, fuliggine colata a strisce
+#   • bruciature con alone di scottatura e chiazze di crosta vetrificata
+# Le coordinate sono ruotate e traslate in modo diverso per ogni singolo oggetto
+# (Object Info), così centinaia di conci non condividono mai lo stesso campione
+# di texture, e ogni gruppo di rumori è "domain warped" per spezzare la
+# regolarità tipica dei procedurali. Roughness e metallic variano con le stesse
+# maschere del colore, non con un singolo rumore.
 # -----------------------------------------------------------------------------
+# Il grafo è impaginato per colonne semantiche; ogni colonna va a capo ogni 30
+# righe così l'albero resta compatto e leggibile nello Shader Editor.
+NODE_COLS = {
+    "coord": -7000, "warp": -6000, "tex": -5000, "mask": -4000,
+    "mix": -2000, "aux": -2000, "rough": -1000, "bump": 0, "out": 1600,
+}
+NODE_RIGHE_BLOCCO = 40
+NODE_PASSO_RIGA = 108.0
+NODE_PASSO_BLOCCO = 420.0
+NODE_FRAME = {
+    "coord": "Coordinate: rotazione e traslazione per oggetto",
+    "warp": "Domain warping: rumori deformati",
+    "tex": "Texture stratificate (macro → millimetrico)",
+    "mask": "Maschere di degrado: crepe, schegge, cenere, bruciature",
+    "mix": "Colore stratificato",
+    "rough": "Roughness e metallic",
+    "bump": "Rilievo e micro-dettaglio",
+}
+
+
+class Superficie:
+    """Costruttore di grafi di shader: gestisce nodi, collegamenti e colonne."""
+
+    def __init__(self, nome, viewport=(0.16, 0.15, 0.14)):
+        self.mat = bpy.data.materials.new(nome)
+        self.mat.diffuse_color = (viewport[0], viewport[1], viewport[2], 1.0)
+        self.mat.use_nodes = True
+        self.tree = self.mat.node_tree
+        self.nodes = self.tree.nodes
+        self.links = self.tree.links
+        self.nodes.clear()
+        self.colonne = {}
+        self.occupato = set()
+        self.bsdf = self.nodo("ShaderNodeBsdfPrincipled", "out", 0)
+        self.bsdf.location = (NODE_COLS["out"] - 360, 60)
+        self.output = self.nodo("ShaderNodeOutputMaterial", "out", 0)
+        self.output.location = (NODE_COLS["out"] + 90, 0)
+        self.L(self.bsdf.outputs["BSDF"], self.output.inputs["Surface"])
+
+    # Scostamenti provati in ordine quando una casella è già occupata: prima di
+    # fianco, poi più in basso, così i nodi di servizio non si accavallano mai.
+    SPOSTAMENTI = ((0.0, 0.0), (250.0, 0.0), (0.0, -46.0), (250.0, -46.0),
+                   (500.0, 0.0), (0.0, -92.0), (250.0, -92.0), (500.0, -46.0),
+                   (-250.0, 0.0), (0.0, 46.0), (500.0, -92.0), (-250.0, -46.0))
+
+    def nodo(self, tipo, col, riga, etichetta=None):
+        node = self.nodes.new(tipo)
+        base_x = NODE_COLS.get(col, col)
+        blocco = int(riga) // NODE_RIGHE_BLOCCO
+        x0 = base_x + blocco * NODE_PASSO_BLOCCO
+        y0 = -(int(riga) % NODE_RIGHE_BLOCCO) * NODE_PASSO_RIGA
+        for dx, dy in self.SPOSTAMENTI:
+            if (x0 + dx, y0 + dy) not in self.occupato:
+                x, y = x0 + dx, y0 + dy
+                break
+        else:  # colonna davvero satura: si scende di una riga intera
+            x, y = x0, y0 - NODE_PASSO_RIGA * (1 + len(self.occupato) // 400)
+        self.occupato.add((x, y))
+        node.location = (x, y)
+        if etichetta:
+            node.label = etichetta
+        self.colonne.setdefault(col, []).append(node)
+        return node
+
+    def inquadra(self):
+        """Raggruppa il grafo in riquadri etichettati, uno per colonna."""
+        for col, etichetta in NODE_FRAME.items():
+            nodi = self.colonne.get(col) or []
+            if len(nodi) < 2:
+                continue
+            frame = self.nodes.new("NodeFrame")
+            frame.label = etichetta
+            for n in nodi:
+                n.parent = frame
+            xs = [n.location[0] for n in nodi]
+            ys = [n.location[1] for n in nodi]
+            frame.location = (min(xs) - 90, max(ys) + 120)
+            frame.width = (max(xs) - min(xs)) + 480
+            frame.height = (max(ys) - min(ys)) + 320
+
+    def L(self, a, b):
+        if a is not None and b is not None:
+            self.links.new(a, b)
+        return b
+
+    def ingresso(self, node, nome, valore):
+        if nome in node.inputs:
+            node.inputs[nome].default_value = valore
+        return node
+
+    def valore(self, v, col="aux", riga=0):
+        """Costante numerica: finisce come default_value, non come nodo."""
+        return float(v)
+
+    def matematica(self, op, a=None, b=None, col="aux", riga=0, etichetta=None):
+        n = self.nodo("ShaderNodeMath", col, riga, etichetta)
+        n.operation = op
+        if a is not None:
+            self.costante(n.inputs[0], a)
+        if b is not None:
+            self.costante(n.inputs[1], b)
+        return n.outputs[0]
+
+    def vettore(self, op, a=None, b=None, col="coord", riga=0, scala=None,
+                etichetta=None, uscita=0):
+        n = self.nodo("ShaderNodeVectorMath", col, riga, etichetta)
+        n.operation = op
+        if a is not None:
+            self.L(a, n.inputs[0])
+        if b is not None:
+            self.L(b, n.inputs[1])
+        if scala is not None:
+            n.inputs[3].default_value = scala
+        return n.outputs[uscita]
+
+    def combina(self, x=0.0, y=0.0, z=0.0, col="coord", riga=0):
+        n = self.nodo("ShaderNodeCombineXYZ", col, riga)
+        n.inputs[0].default_value = x
+        n.inputs[1].default_value = y
+        n.inputs[2].default_value = z
+        return n.outputs[0]
+
+    def componi(self, x, y, z, col="coord", riga=0):
+        """Versione pilotata da socket: i tre assi arrivano da altri nodi."""
+        n = self.nodo("ShaderNodeCombineXYZ", col, riga)
+        self.L(x, n.inputs[0])
+        self.L(y, n.inputs[1])
+        self.L(z, n.inputs[2])
+        return n.outputs[0]
+
+    def separa(self, v, col="mask", riga=0):
+        n = self.nodo("ShaderNodeSeparateXYZ", col, riga)
+        self.L(v, n.inputs[0])
+        return n
+
+    def canale(self, colore, col="mask", riga=0):
+        """Estrae il canale rosso da un colore (maschere in scala di grigi)."""
+        n = self.nodo("ShaderNodeSeparateColor", col, riga)
+        self.L(colore, n.inputs["Color"])
+        return n.outputs["Red"]
+
+    def costante(self, socket, valore):
+        """Imposta un valore fisso (tupla colore o numero) oppure collega un socket."""
+        if not isinstance(valore, (tuple, list, int, float)):
+            self.L(valore, socket)
+            return socket
+        if isinstance(valore, (tuple, list)):
+            socket.default_value = (tuple(valore) + (1.0,))[:4] if len(valore) == 3 else tuple(valore)
+        elif socket.type == "RGBA":
+            socket.default_value = (float(valore), float(valore), float(valore), 1.0)
+        else:
+            socket.default_value = float(valore)
+        return socket
+
+    def miscela(self, fac, a, b, col="mix", riga=0, tipo="COLORE", etichetta=None):
+        n = self.nodo("ShaderNodeMix", col, riga, etichetta)
+        n.data_type = "RGBA" if tipo == "COLORE" else "FLOAT"
+        self.costante(n.inputs[0], fac)
+        ia, ib, io = (6, 7, 2) if tipo == "COLORE" else (2, 3, 0)
+        self.costante(n.inputs[ia], a)
+        self.costante(n.inputs[ib], b)
+        return n.outputs[io]
+
+    def prodotto_colore(self, a, b, col="mix", riga=0, etichetta=None):
+        """Moltiplicazione cromatica (la matematica su colori perderebbe i canali)."""
+        n = self.nodo("ShaderNodeMix", col, riga, etichetta)
+        n.data_type = "RGBA"
+        n.blend_type = "MULTIPLY"
+        n.inputs[0].default_value = 1.0
+        self.costante(n.inputs[6], a)
+        self.costante(n.inputs[7], b)
+        return n.outputs[2]
+
+    def rampa(self, fac, soglie, col="mask", riga=0, interp="LINEAR", etichetta=None):
+        """Soglie: [(posizione, colore_o_valore)]; i float diventano grigi."""
+        n = self.nodo("ShaderNodeValToRGB", col, riga, etichetta)
+        try:
+            n.color_ramp.interpolation = interp
+        except Exception:
+            pass
+        els = n.color_ramp.elements
+        for i, soglia in enumerate(soglie):
+            pos, val = soglia
+            if isinstance(val, (int, float)):
+                rgba = (float(val), float(val), float(val), 1.0)
+            else:
+                rgba = (val[0], val[1], val[2], 1.0)
+            el = els[i] if i < len(els) else els.new(pos)
+            el.position = pos
+            el.color = rgba
+        if fac is not None:
+            self.costante(n.inputs[0], fac)
+        return n.outputs["Color"]
+
+    def rumore(self, vett, scala=1.0, dettaglio=6.0, ruvido=0.6, distorsione=0.0,
+               col="tex", riga=0, etichetta=None):
+        n = self.nodo("ShaderNodeTexNoise", col, riga, etichetta)
+        if vett is not None:
+            self.L(vett, n.inputs["Vector"])
+        self.ingresso(n, "Scale", scala)
+        self.ingresso(n, "Detail", dettaglio)
+        self.ingresso(n, "Roughness", ruvido)
+        self.ingresso(n, "Distortion", distorsione)
+        return n
+
+    def voronoi(self, vett, scala=5.0, feature="F1", casualita=1.0,
+                col="tex", riga=0, etichetta=None):
+        n = self.nodo("ShaderNodeTexVoronoi", col, riga, etichetta)
+        n.feature = feature
+        if vett is not None:
+            self.L(vett, n.inputs["Vector"])
+        self.ingresso(n, "Scale", scala)
+        self.ingresso(n, "Randomness", casualita)
+        return n
+
+    def onda(self, vett, scala=4.0, distorsione=6.0, dettaglio=6.0, tipo="BANDS",
+             direzione="X", profilo="SIN", col="tex", riga=0, etichetta=None):
+        n = self.nodo("ShaderNodeTexWave", col, riga, etichetta)
+        n.wave_type = tipo
+        n.wave_profile = profilo
+        if tipo == "BANDS":
+            n.bands_direction = direzione
+        else:
+            n.rings_direction = direzione
+        self.ingresso(n, "Scale", scala)
+        self.ingresso(n, "Distortion", distorsione)
+        self.ingresso(n, "Detail", dettaglio)
+        if vett is not None:
+            self.L(vett, n.inputs["Vector"])
+        return n
+
+
+def materiale_eroso(nome, viewport, r):
+    """Costruisce una superficie erosa completa a partire da una ricetta."""
+    S = Superficie(nome, viewport)
+    bsdf = S.bsdf
+    dato = lambda c, d: r.get(c, d)
+
+    macro_scala, macro_dett = dato("macro", (0.50, 6.0))
+    meso_scala, meso_dett = dato("meso", (6.5, 8.0))
+    micro_scala, micro_dett = dato("micro", (48.0, 3.0))
+    medio_scala, medio_dett = dato("medio", (2.2, 7.0))
+    mondo_scala, brucia_peso = dato("bruciatura", (0.33, 0.55))
+    # Le misure dei difetti sono in metri: lato della cella e mezza larghezza
+    # del solco.  Vengono convertite nelle unità del dominio che le ospita, così
+    # ritoccare la scala di una texture non deforma crepe, vaioli e schegge.
+    crepa_cella, crepa_peso, crepa_mezza = dato("crepa", (1.20, 1.0, 0.06))
+    craq_cella, craq_peso, craq_mezza = dato("craquelure", (0.06, 0.42, 0.004))
+    vaiolo_cella, vaiolo_peso = dato("vaioli", (0.06, 0.5))
+    scheggia_cella, scheggia_peso = dato("schegge", (0.11, 0.55))
+    cenere_peso = dato("cenere", 0.5)
+    fuliggine_peso = dato("fuliggine", 0.4)
+    usura_peso = dato("usura", 0.55)
+    ruggine_peso = dato("ruggine", 0.0)
+    graffio_cella, graffi_peso = dato("graffi", (0.03, 0.0))
+    martell_cella, martell_peso = dato("martellatura", (0.14, 0.0))
+    scaglia_cella, scaglia_peso = dato("scaglie", (0.13, 0.0))
+    brace_peso = dato("brace", 0.0)
+    vetro_peso = dato("vetrificato", 0.35)
+    rilievo, rilievo_d = dato("rilievo", (0.55, 0.030))
+    microrilievo, microrilievo_d = dato("microrilievo", (0.22, 0.005))
+    grano = dato("grano", None)
+
+    # Dalle misure in metri alle scale dei nodi: una cella di lato L sul dominio
+    # di scala S si ottiene con uno Scale pari a 1/(L*S), e la soglia della rampa
+    # è la mezza larghezza espressa in frazioni di cella.
+    def celle(metri, scala):
+        return 1.0 / max(metri * scala, 1e-4)
+
+    def soglia(mezza, cella):
+        return min(mezza / max(cella, 1e-4), 0.49)
+
+    crepa_mult = celle(crepa_cella, macro_scala)
+    crepa_largh = soglia(crepa_mezza, crepa_cella)
+    craq_mult = celle(craq_cella, meso_scala)
+    craq_largh = soglia(craq_mezza, craq_cella)
+    vaiolo_mult = celle(vaiolo_cella, micro_scala)
+    scheggia_mult = celle(scheggia_cella, meso_scala)
+    martell_mult = celle(martell_cella, meso_scala)
+    scaglia_mult = celle(scaglia_cella, meso_scala)
+    graffio_mult = celle(graffio_cella, meso_scala)
+
+    c_profondo = dato("col_profondo", (0.0085, 0.0090, 0.0115))
+    c_base = dato("col_base", (0.052, 0.050, 0.049))
+    c_chiaro = dato("col_chiaro", (0.115, 0.110, 0.104))
+    c_fresco = dato("col_fresco", (0.098, 0.092, 0.085))
+    c_crepa = dato("col_crepa", (0.0022, 0.0022, 0.0028))
+    c_cenere = dato("col_cenere", (0.150, 0.138, 0.129))
+    c_fuliggine = dato("col_fuliggine", (0.0075, 0.0068, 0.0068))
+    c_bruciato = dato("col_bruciato", (0.0050, 0.0042, 0.0042))
+    c_scottatura = dato("col_scottatura", (0.058, 0.024, 0.013))
+    c_ruggine = dato("col_ruggine", (0.105, 0.045, 0.020))
+    c_brace = dato("col_brace", (1.0, 0.17, 0.02))
+
+    ruvido = dato("ruvido", 0.86)
+    metallico = dato("metallico", 0.0)
+
+    # ------------------------------------------------------------- coordinate
+    tc = S.nodo("ShaderNodeTexCoord", "coord", 0, "Coordinate")
+    geo = S.nodo("ShaderNodeNewGeometry", "coord", 6, "Geometria")
+    oi = S.nodo("ShaderNodeObjectInfo", "coord", 9, "Info oggetto")
+    casuale = oi.outputs["Random"]
+
+    rot = S.nodo("ShaderNodeVectorRotate", "coord", 1, "Rotazione per oggetto")
+    rot.rotation_type = "Z_AXIS"
+    S.L(tc.outputs["Object"], rot.inputs["Vector"])
+    S.L(S.matematica("MULTIPLY", casuale, S.valore(6.2832, "coord", 10), "coord", 2),
+        rot.inputs["Angle"])
+
+    # Ogni oggetto campiona una zona diversa della texture: posizione nel mondo
+    # più un seme casuale decorrelato asse per asse.
+    off_mondo = S.vettore("SCALE", oi.outputs["Location"], col="coord", riga=3, scala=3.7)
+    off_seme = S.componi(
+        S.matematica("MULTIPLY", casuale, S.valore(97.3, "coord", 11), "coord", 12),
+        S.matematica("MULTIPLY", casuale, S.valore(151.7, "coord", 11), "coord", 13),
+        S.matematica("MULTIPLY", casuale, S.valore(53.9, "coord", 11), "coord", 14),
+        "coord", 15)
+    P = S.vettore("ADD", S.vettore("ADD", rot.outputs[0], off_mondo, "coord", 4),
+                  off_seme, "coord", 5, etichetta="Spazio texture per oggetto")
+    if grano:
+        P = S.vettore("MULTIPLY", P, S.combina(grano[0], grano[1], grano[2], "coord", 7),
+                      "coord", 8, etichetta="Grana anisotropa")
+
+    def gruppo(sorgente, base, ampiezza, riga, etichetta):
+        """Coordinate pre-scalate e deformate: domain warping anti-regolarità."""
+        v = S.vettore("SCALE", sorgente, col="warp", riga=riga, scala=base)
+        n = S.rumore(v, scala=0.42, dettaglio=4.0, ruvido=0.78, distorsione=1.1,
+                     col="warp", riga=riga + 1, etichetta="Deformazione " + etichetta)
+        d = S.vettore("ADD", n.outputs["Color"], S.combina(-0.5, -0.5, -0.5, "warp", riga + 2),
+                      col="warp", riga=riga + 2)
+        d = S.vettore("SCALE", d, col="warp", riga=riga + 3, scala=ampiezza * 2.2)
+        return S.vettore("ADD", v, d, col="warp", riga=riga + 4, etichetta=etichetta)
+
+    g_macro = gruppo(P, macro_scala, 0.55, 0, "Dominio macro")
+    g_meso = gruppo(P, meso_scala, 0.42, 6, "Dominio della grana")
+    g_micro = S.vettore("SCALE", P, col="warp", riga=12, scala=micro_scala,
+                        etichetta="Dominio del grit")
+    g_medio = S.vettore("SCALE", P, col="warp", riga=16, scala=medio_scala,
+                        etichetta="Dominio delle chiazze")
+    g_mondo = gruppo(geo.outputs["Position"], mondo_scala, 0.30, 14, "Dominio mondo")
+
+    # --------------------------------------------------------------- texture
+    n_macro = S.rumore(g_macro, scala=1.0, dettaglio=macro_dett, ruvido=0.66,
+                       distorsione=0.55, col="tex", riga=0, etichetta="Chiazze litologiche")
+    n_meso = S.rumore(g_meso, scala=1.0, dettaglio=meso_dett, ruvido=0.62,
+                      distorsione=0.40, col="tex", riga=2, etichetta="Grana della pietra")
+    n_micro = S.rumore(g_micro, scala=1.0, dettaglio=micro_dett, ruvido=0.5,
+                       distorsione=0.20, col="tex", riga=4, etichetta="Grit millimetrico")
+    n_grumo = S.rumore(g_medio, scala=1.0, dettaglio=medio_dett, ruvido=0.88,
+                       distorsione=0.0, col="tex", riga=6, etichetta="Aggregati e chiazze")
+    n_vario = S.rumore(g_macro, scala=0.5, dettaglio=5.0, ruvido=0.70, distorsione=0.0,
+                       col="tex", riga=8, etichetta="Variazione lenta")
+    n_brucia = S.rumore(g_mondo, scala=1.0, dettaglio=7.0, ruvido=0.72, distorsione=1.0,
+                        col="tex", riga=10, etichetta="Macchie di combustione")
+
+    # ------------------------------------------------------- usura geometrica
+    puntuta = geo.outputs["Pointiness"]
+    normale = geo.outputs["Normal"]
+    spigolo = S.rampa(puntuta, [(0.010, 0.0), (0.085, 0.35), (0.28, 1.0)], "mask", 2,
+                      interp="EASE", etichetta="Spigoli esposti")
+    concavo = S.rampa(puntuta, [(0.0, 0.0), (-0.30, 1.0)], "mask", 3, interp="EASE",
+                      etichetta="Cavità")
+    su = S.vettore("DOT_PRODUCT", normale, S.combina(0, 0, 1, "mask", 4), col="mask",
+                   riga=4, uscita=1, etichetta="Rivolto in alto")
+    rivolto_su = S.rampa(su, [(0.05, 0.0), (0.62, 1.0)], "mask", 5, interp="EASE")
+
+    # ------------------------------------------------- prossimità al fuoco
+    pm = S.separa(geo.outputs["Position"], "mask", 20)
+    cal_x = S.rampa(S.matematica("ABSOLUTE", pm.outputs["X"], col="mask", riga=21),
+                    [(1.4, 1.0), (7.5, 0.0)], "mask", 22, interp="EASE")
+    cal_z = S.rampa(S.matematica("ABSOLUTE",
+                                 S.matematica("SUBTRACT", pm.outputs["Z"],
+                                              S.valore(3.2, "mask", 23), "mask", 23),
+                                 col="mask", riga=24),
+                    [(0.9, 1.0), (8.5, 0.12)], "mask", 25, interp="EASE")
+    cal_y = S.rampa(S.matematica("ABSOLUTE", pm.outputs["Y"], col="mask", riga=26),
+                    [(2.2, 1.0), (10.0, 0.22)], "mask", 27, interp="EASE")
+    calore = S.matematica("MULTIPLY",
+                          S.matematica("MULTIPLY", cal_x, cal_z, "mask", 28),
+                          cal_y, "mask", 29, etichetta="Calore della soglia")
+
+    # ----------------------------------------------------------------- crepe
+    crepa_fac = S.voronoi(g_macro, scala=crepa_mult, feature="DISTANCE_TO_EDGE",
+                          casualita=0.85, col="tex", riga=12, etichetta="Rete di crepe")
+    crepa_grezza = S.rampa(crepa_fac.outputs["Distance"],
+                           [(0.0, 1.0), (crepa_largh * 0.45, 0.78), (crepa_largh, 0.0)],
+                           "mask", 30, interp="EASE", etichetta="Crepe profonde")
+    # Le crepe si interrompono dove la roccia è compatta: niente reticolo perfetto.
+    cancella = S.rampa(n_vario.outputs["Fac"], [(0.34, 0.0), (0.52, 1.0)], "mask", 31,
+                       interp="EASE", etichetta="Interruzione delle crepe")
+    crepe = S.matematica("MULTIPLY",
+                         S.matematica("MULTIPLY", crepa_grezza, cancella, "mask", 32),
+                         S.valore(crepa_peso, "mask", 33), "mask", 34, etichetta="Crepe")
+
+    craq_fac = S.voronoi(g_meso, scala=craq_mult, feature="DISTANCE_TO_EDGE",
+                         casualita=1.0, col="tex", riga=14, etichetta="Craquelure")
+    craquelure = S.rampa(craq_fac.outputs["Distance"],
+                         [(0.0, 1.0), (craq_largh * 0.4, 0.55), (craq_largh, 0.0)],
+                         "mask", 35, interp="EASE")
+    craquelure = S.matematica("MULTIPLY", craquelure, S.valore(craq_peso, "mask", 36),
+                              "mask", 37, etichetta="Craquelure")
+
+    # ------------------------------------------------- vaiolature e schegge
+    if vaiolo_peso > 0.0:
+        vaiolo_fac = S.voronoi(g_micro, scala=vaiolo_mult, feature="F1", casualita=1.0,
+                               col="tex", riga=16, etichetta="Vaiolature")
+        vaiolo_m = S.rampa(vaiolo_fac.outputs["Distance"],
+                           [(0.0, 1.0), (0.16, 0.72), (0.34, 0.0)], "mask", 38,
+                           interp="EASE")
+        vaiolo_m = S.matematica("MULTIPLY", vaiolo_m,
+                                S.rampa(n_grumo.outputs["Fac"], [(0.30, 0.0), (0.58, 1.0)],
+                                        "mask", 39), "mask", 40)
+        vaioli = S.matematica("MULTIPLY", vaiolo_m, S.valore(vaiolo_peso, "mask", 41),
+                              "mask", 42, etichetta="Vaioli e porosità")
+    else:
+        vaioli = S.valore(0.0, "mask", 42)
+
+    if scheggia_peso > 0.0:
+        cella = S.voronoi(g_meso, scala=scheggia_mult, feature="F1", casualita=1.0,
+                          col="tex", riga=18, etichetta="Cellule di distacco")
+        scheggia_m = S.rampa(S.canale(cella.outputs["Color"], "mask", 43),
+                             [(0.72, 0.0), (0.90, 1.0)], "mask", 44, interp="EASE")
+        scheggia_m = S.matematica("MULTIPLY", scheggia_m,
+                                  S.matematica("ADD", S.valore(0.35, "mask", 45),
+                                               S.matematica("MULTIPLY", spigolo,
+                                                            S.valore(0.85, "mask", 45),
+                                                            "mask", 46), "mask", 47),
+                                  "mask", 48)
+        scheggia_m = S.matematica("MULTIPLY", scheggia_m,
+                                  S.rampa(n_grumo.outputs["Fac"], [(0.22, 0.0), (0.50, 1.0)],
+                                          "mask", 49), "mask", 50)
+        schegge = S.matematica("MULTIPLY", scheggia_m,
+                               S.valore(scheggia_peso, "mask", 51), "mask", 52,
+                               etichetta="Scheggiature")
+    else:
+        schegge = S.valore(0.0, "mask", 52)
+
+    # ------------------------------- bruciature, cenere, fuliggine, vetrificato
+    bruciato = S.rampa(n_brucia.outputs["Fac"], [(0.33, 0.0), (0.57, 1.0)], "mask", 54,
+                       interp="EASE", etichetta="Nucleo carbonizzato")
+    scottatura = S.rampa(n_brucia.outputs["Fac"],
+                         [(0.26, 0.0), (0.35, 1.0), (0.49, 1.0), (0.58, 0.0)], "mask", 55,
+                         interp="EASE", etichetta="Alone di scottatura")
+    m_bruciato = S.matematica("MULTIPLY",
+                              S.matematica("MULTIPLY", bruciato, calore, "mask", 56),
+                              S.valore(brucia_peso, "mask", 57), "mask", 58,
+                              etichetta="Bruciature")
+    m_scottato = S.matematica("MULTIPLY",
+                              S.matematica("MULTIPLY", scottatura, calore, "mask", 59),
+                              S.valore(min(1.0, brucia_peso * 0.85), "mask", 60), "mask", 61,
+                              etichetta="Scottature")
+    vetro = S.matematica("MULTIPLY",
+                         S.matematica("MULTIPLY",
+                                      S.rampa(n_brucia.outputs["Fac"],
+                                              [(0.60, 0.0), (0.78, 1.0)], "mask", 62,
+                                              interp="EASE"),
+                                      calore, "mask", 63),
+                         S.valore(vetro_peso, "mask", 64), "mask", 65,
+                         etichetta="Crosta vetrificata")
+
+    cenere_bassa = S.rampa(pm.outputs["Z"], [(0.15, 1.0), (7.0, 0.18)], "mask", 66,
+                           interp="EASE")
+    cenere_su = S.matematica("MULTIPLY", rivolto_su,
+                             S.matematica("ADD", S.valore(0.35, "mask", 67),
+                                          S.matematica("MULTIPLY", n_grumo.outputs["Fac"],
+                                                       S.valore(0.75, "mask", 68), "mask", 69),
+                                          "mask", 70), "mask", 71)
+    cenere_cava = S.matematica("MULTIPLY", concavo, S.valore(0.75, "mask", 72), "mask", 73)
+    m_cenere = S.matematica("MULTIPLY",
+                            S.matematica("ADD", cenere_su, cenere_cava, "mask", 74),
+                            S.matematica("ADD", S.valore(0.25, "mask", 75),
+                                         S.matematica("MULTIPLY", cenere_bassa,
+                                                      S.valore(0.85, "mask", 76), "mask", 77),
+                                         "mask", 78), "mask", 79)
+    # Lo spessore del deposito segue la rugosità: niente velature piatte.
+    m_cenere = S.matematica("MULTIPLY", m_cenere,
+                            S.rampa(S.matematica("MULTIPLY", n_grumo.outputs["Fac"],
+                                                 S.valore(0.75, "mask", 143), "mask", 143),
+                                    [(0.18, 0.10), (0.62, 1.0)], "mask", 143,
+                                    interp="EASE"), "mask", 144)
+    m_cenere = S.matematica("MULTIPLY", m_cenere, S.valore(cenere_peso, "mask", 80),
+                            "mask", 81, etichetta="Depositi di cenere")
+
+    if fuliggine_peso > 0.0:
+        striscia = S.onda(S.vettore("MULTIPLY", P, S.combina(2.6, 2.6, 0.22, "tex", 20),
+                                    col="tex", riga=20),
+                          scala=1.15, distorsione=7.5, dettaglio=8.0, tipo="BANDS",
+                          direzione="X", profilo="SIN", col="tex", riga=20,
+                          etichetta="Colature di fuliggine")
+        m_fuliggine = S.rampa(striscia.outputs["Fac"], [(0.52, 0.0), (0.86, 1.0)],
+                              "mask", 82, interp="EASE")
+        m_fuliggine = S.matematica("MULTIPLY", m_fuliggine,
+                                   S.matematica("SUBTRACT", S.valore(1.0, "mask", 83),
+                                                S.matematica("MULTIPLY", rivolto_su,
+                                                             S.valore(0.8, "mask", 83),
+                                                             "mask", 84), "mask", 85),
+                                   "mask", 86)
+        m_fuliggine = S.matematica("MULTIPLY", m_fuliggine,
+                                   S.matematica("ADD", S.valore(0.20, "mask", 87),
+                                                S.matematica("MULTIPLY", calore,
+                                                             S.valore(0.9, "mask", 87),
+                                                             "mask", 88), "mask", 89),
+                                   "mask", 90)
+        m_fuliggine = S.matematica("MULTIPLY", m_fuliggine,
+                                   S.rampa(S.matematica("MULTIPLY", n_grumo.outputs["Fac"],
+                                                        S.valore(0.8, "mask", 145), "mask", 145),
+                                           [(0.22, 0.15), (0.68, 1.0)], "mask", 145,
+                                           interp="EASE"), "mask", 146)
+        m_fuliggine = S.matematica("MULTIPLY", m_fuliggine,
+                                   S.valore(fuliggine_peso, "mask", 91), "mask", 92,
+                                   etichetta="Fuliggine")
+    else:
+        m_fuliggine = S.valore(0.0, "mask", 92)
+
+    # --------------------------- metallo: ossidi, martellatura, scaglie, graffi
+    if ruggine_peso > 0.0:
+        ruggine_m = S.rampa(n_grumo.outputs["Fac"], [(0.44, 0.0), (0.66, 1.0)], "mask", 94,
+                            interp="EASE")
+        ruggine_m = S.matematica("MULTIPLY", ruggine_m,
+                                 S.matematica("ADD", S.valore(0.30, "mask", 95),
+                                              S.matematica("MULTIPLY",
+                                                           S.matematica("ADD", rivolto_su,
+                                                                        concavo, "mask", 96),
+                                                           S.valore(0.7, "mask", 97),
+                                                           "mask", 98), "mask", 99),
+                                 "mask", 100)
+        ruggine_m = S.matematica("MULTIPLY", ruggine_m,
+                                 S.matematica("SUBTRACT", S.valore(1.0, "mask", 101),
+                                              S.matematica("MULTIPLY", spigolo,
+                                                           S.valore(0.65, "mask", 101),
+                                                           "mask", 102), "mask", 103),
+                                 "mask", 104)
+        m_ruggine = S.matematica("MULTIPLY", ruggine_m, S.valore(ruggine_peso, "mask", 105),
+                                 "mask", 106, etichetta="Ruggine e ossidi")
+    else:
+        m_ruggine = S.valore(0.0, "mask", 106)
+
+    if martell_peso > 0.0:
+        martello = S.voronoi(g_meso, scala=martell_mult, feature="F1", casualita=1.0,
+                             col="tex", riga=22, etichetta="Martellatura")
+        m_martello = S.rampa(martello.outputs["Distance"],
+                             [(0.0, 1.0), (0.22, 0.45), (0.42, 0.0)], "mask", 107,
+                             interp="EASE")
+        m_martello = S.matematica("MULTIPLY", m_martello,
+                                  S.valore(martell_peso, "mask", 108), "mask", 109,
+                                  etichetta="Conche di forgia")
+    else:
+        m_martello = S.valore(0.0, "mask", 109)
+
+    if scaglia_peso > 0.0:
+        scaglia = S.voronoi(g_meso, scala=scaglia_mult, feature="DISTANCE_TO_EDGE",
+                            casualita=1.0, col="tex", riga=24, etichetta="Scaglie di forgia")
+        m_scaglia = S.rampa(scaglia.outputs["Distance"],
+                            [(0.0, 1.0), (0.05, 0.65), (0.16, 0.0)], "mask", 110,
+                            interp="EASE")
+        m_scaglia = S.matematica("MULTIPLY", m_scaglia,
+                                 S.valore(scaglia_peso, "mask", 111), "mask", 112,
+                                 etichetta="Scaglie")
+    else:
+        m_scaglia = S.valore(0.0, "mask", 112)
+
+    if graffi_peso > 0.0:
+        graffio = S.onda(S.vettore("MULTIPLY", g_meso, S.combina(1.0, 1.0, 0.12, "tex", 26),
+                                   col="tex", riga=26),
+                         scala=graffio_mult, distorsione=11.0, dettaglio=9.0, tipo="BANDS",
+                         direzione="Z", profilo="SAW", col="tex", riga=26, etichetta="Graffi")
+        m_graffio = S.rampa(graffio.outputs["Fac"], [(0.55, 0.0), (0.78, 1.0)], "mask", 113,
+                            interp="EASE")
+        m_graffio = S.matematica("MULTIPLY", m_graffio, S.valore(graffi_peso, "mask", 114),
+                                 "mask", 115, etichetta="Graffi")
+    else:
+        m_graffio = S.valore(0.0, "mask", 115)
+
+    # ------------------------------------------------------ spigoli consumati
+    m_usura = S.matematica("MULTIPLY", spigolo,
+                           S.matematica("ADD", S.valore(0.45, "mask", 116),
+                                        S.matematica("MULTIPLY", n_meso.outputs["Fac"],
+                                                     S.valore(0.75, "mask", 117), "mask", 118),
+                                        "mask", 119), "mask", 120)
+    m_usura = S.matematica("MULTIPLY", m_usura, S.valore(usura_peso, "mask", 121),
+                           "mask", 122, etichetta="Bordi consumati")
+
+    # -------------------------------------------------------------- colore
+    colore = S.miscela(S.rampa(n_macro.outputs["Fac"], [(0.30, 0.0), (0.72, 1.0)],
+                               "mask", 124, interp="EASE", etichetta="Litologia"),
+                       c_profondo, c_base, "mix", 0, etichetta="Corpo della roccia")
+    colore = S.miscela(S.matematica("MULTIPLY",
+                                    S.rampa(n_grumo.outputs["Fac"], [(0.26, 0.0), (0.68, 1.0)],
+                                            "mask", 141, interp="EASE",
+                                            etichetta="Chiazze di erosione"),
+                                    S.valore(0.75, "mask", 141), "mask", 141),
+                       colore, c_profondo, "mix", 1, etichetta="Chiazze di erosione")
+    colore = S.miscela(S.rampa(n_meso.outputs["Fac"], [(0.52, 0.0), (0.86, 1.0)],
+                               "mask", 125, interp="EASE"),
+                       colore, c_chiaro, "mix", 2, etichetta="Inclusioni chiare")
+    colore = S.miscela(S.matematica("MULTIPLY", n_grumo.outputs["Fac"],
+                                    S.valore(0.45, "mask", 142), "mask", 142),
+                       colore, c_chiaro, "mix", 3, etichetta="Venature chiare")
+    # Il grit finestto vive soprattutto nell'albedo: il denoiser spiana il
+    # micro-rilievo normale, mentre la variazione di colore gli sopravvive.
+    grana = S.matematica("SUBTRACT", n_micro.outputs["Fac"],
+                         S.valore(0.5, "mask", 126), "mask", 126, etichetta="Grit")
+    colore = S.miscela(S.matematica("MULTIPLY",
+                                    S.matematica("MAXIMUM", grana,
+                                                 S.valore(0.0, "mask", 126), "mask", 126),
+                                    S.valore(0.85, "mask", 127), "mask", 127),
+                       colore, c_chiaro, "mix", 4, etichetta="Grit chiaro")
+    colore = S.miscela(S.matematica("MULTIPLY",
+                                    S.matematica("MAXIMUM",
+                                                 S.matematica("SUBTRACT",
+                                                              S.valore(0.0, "mask", 128),
+                                                              grana, "mask", 128),
+                                                 S.valore(0.0, "mask", 128), "mask", 128),
+                                    S.valore(0.85, "mask", 129), "mask", 129),
+                       colore, c_profondo, "mix", 5, etichetta="Grit scuro")
+    if vaiolo_peso > 0.0:
+        colore = S.miscela(S.matematica("MULTIPLY", vaioli, S.valore(0.85, "mask", 128),
+                                        "mask", 129),
+                           colore, c_profondo, "mix", 5, etichetta="Vaioli")
+    if scaglia_peso > 0.0:
+        colore = S.miscela(S.matematica("MULTIPLY", m_scaglia, S.valore(0.8, "mask", 130),
+                                        "mask", 131),
+                           colore, c_crepa, "mix", 6, etichetta="Scaglie di ossido")
+    if scheggia_peso > 0.0:
+        colore = S.miscela(schegge, colore, c_fresco, "mix", 7, etichetta="Facce di frattura")
+    colore = S.miscela(m_usura, colore, c_fresco, "mix", 8, etichetta="Spigoli consumati")
+    colore = S.miscela(craquelure, colore, c_crepa, "mix", 9, etichetta="Craquelure")
+    colore = S.miscela(crepe, colore, c_crepa, "mix", 10, etichetta="Crepe profonde")
+    colore = S.miscela(m_scottato, colore, c_scottatura, "mix", 11, etichetta="Scottature")
+    colore = S.miscela(m_bruciato, colore, c_bruciato, "mix", 12, etichetta="Bruciature")
+    if ruggine_peso > 0.0:
+        colore = S.miscela(m_ruggine, colore, c_ruggine, "mix", 13, etichetta="Ossidi")
+    colore = S.miscela(m_fuliggine, colore, c_fuliggine, "mix", 14, etichetta="Fuliggine")
+    colore = S.miscela(S.matematica("MULTIPLY", m_cenere, S.valore(0.85, "mask", 132),
+                                    "mask", 133),
+                       colore, c_cenere, "mix", 15, etichetta="Cenere")
+    if graffi_peso > 0.0:
+        colore = S.miscela(S.matematica("MULTIPLY", m_graffio, S.valore(0.5, "mask", 134),
+                                        "mask", 135),
+                           colore, c_chiaro, "mix", 16, etichetta="Graffi")
+
+    # Variazione per oggetto: nessun concio è identico al vicino.
+    variazione = S.rampa(casuale, [(0.0, 0.80), (0.5, 1.0), (1.0, 1.22)], "mask", 136,
+                         interp="EASE", etichetta="Variazione per oggetto")
+    temperatura = S.rampa(casuale, [(0.0, 0.0), (1.0, 1.0)], "mask", 137)
+    colore = S.prodotto_colore(colore, variazione, "mix", 17, etichetta="Colore per oggetto")
+    caldo = S.combina(1.07, 1.0, 0.95, "mix", 18)
+    colore = S.miscela(S.matematica("MULTIPLY", temperatura, S.valore(0.35, "mix", 19),
+                                    "mix", 19),
+                       colore, S.prodotto_colore(colore, caldo, "mix", 20), "mix", 21,
+                       etichetta="Temperatura per oggetto")
+
+    # ----------------------------------------------------------- roughness
+    ruv = S.valore(ruvido, "rough", 0)
+    ruv = S.matematica("ADD", ruv,
+                       S.matematica("MULTIPLY",
+                                    S.matematica("SUBTRACT", n_macro.outputs["Fac"],
+                                                 S.valore(0.5, "rough", 1), "rough", 1),
+                                    S.valore(0.16, "rough", 1), "rough", 2), "rough", 2)
+    ruv = S.matematica("ADD", ruv,
+                       S.matematica("MULTIPLY",
+                                    S.matematica("SUBTRACT", n_meso.outputs["Fac"],
+                                                 S.valore(0.5, "rough", 3), "rough", 3),
+                                    S.valore(0.12, "rough", 3), "rough", 4), "rough", 4)
+    ruv = S.matematica("ADD", ruv,
+                       S.matematica("MULTIPLY",
+                                    S.matematica("SUBTRACT", n_micro.outputs["Fac"],
+                                                 S.valore(0.5, "rough", 5), "rough", 5),
+                                    S.valore(0.07, "rough", 5), "rough", 6), "rough", 6)
+    if vaiolo_peso > 0.0:
+        ruv = S.miscela(S.matematica("MULTIPLY", vaioli, S.valore(0.8, "rough", 7), "rough", 7),
+                        ruv, S.valore(0.98, "rough", 7), "rough", 7, tipo="VALORE",
+                        etichetta="Vaioli opachi")
+    if martell_peso > 0.0:
+        ruv = S.miscela(S.matematica("MULTIPLY", m_martello, S.valore(0.55, "rough", 8),
+                                     "rough", 8),
+                        ruv, S.valore(0.82, "rough", 8), "rough", 8, tipo="VALORE",
+                        etichetta="Fondo delle conche")
+    if scaglia_peso > 0.0:
+        ruv = S.miscela(S.matematica("MULTIPLY", m_scaglia, S.valore(0.7, "rough", 9),
+                                     "rough", 9),
+                        ruv, S.valore(0.92, "rough", 9), "rough", 9, tipo="VALORE")
+    ruv = S.miscela(crepe, ruv, S.valore(0.97, "rough", 10), "rough", 10, tipo="VALORE",
+                    etichetta="Fondo delle crepe")
+    ruv = S.miscela(craquelure, ruv, S.valore(0.93, "rough", 11), "rough", 11, tipo="VALORE")
+    ruv = S.miscela(S.matematica("MULTIPLY", m_cenere, S.valore(0.55, "rough", 12), "rough", 12),
+                    ruv, S.valore(0.96, "rough", 12), "rough", 12, tipo="VALORE",
+                    etichetta="Cenere opaca")
+    ruv = S.miscela(S.matematica("MULTIPLY", m_fuliggine, S.valore(0.45, "rough", 13),
+                                 "rough", 13),
+                    ruv, S.valore(0.94, "rough", 13), "rough", 13, tipo="VALORE")
+    if ruggine_peso > 0.0:
+        ruv = S.miscela(m_ruggine, ruv, S.valore(0.88, "rough", 14), "rough", 14,
+                        tipo="VALORE", etichetta="Ruggine")
+    ruv = S.miscela(S.matematica("MULTIPLY", m_usura, S.valore(0.75, "rough", 15), "rough", 15),
+                    ruv, S.valore(0.46, "rough", 15), "rough", 15, tipo="VALORE",
+                    etichetta="Spigoli levigati")
+    if graffi_peso > 0.0:
+        ruv = S.miscela(S.matematica("MULTIPLY", m_graffio, S.valore(0.7, "rough", 16),
+                                     "rough", 16),
+                        ruv, S.valore(0.34, "rough", 16), "rough", 16, tipo="VALORE")
+    ruv = S.miscela(vetro, ruv, S.valore(0.34, "rough", 17), "rough", 17, tipo="VALORE",
+                    etichetta="Crosta vetrificata")
+    ruv = S.matematica("ADD", ruv,
+                       S.matematica("MULTIPLY",
+                                    S.matematica("SUBTRACT", casuale,
+                                                 S.valore(0.5, "rough", 18), "rough", 18),
+                                    S.valore(0.12, "rough", 18), "rough", 18),
+                       "rough", 18, etichetta="Roughness per oggetto")
+    ruv = S.matematica("MAXIMUM", ruv, S.valore(0.05, "rough", 19), "rough", 19)
+    ruv = S.matematica("MINIMUM", ruv, S.valore(1.0, "rough", 20), "rough", 20)
+
+    # ------------------------------------------------------------ metallic
+    metallo = S.valore(metallico, "rough", 22)
+    if metallico > 0.01:
+        if ruggine_peso > 0.0:
+            metallo = S.miscela(m_ruggine, metallo, S.valore(0.12, "rough", 23), "rough", 23,
+                                tipo="VALORE", etichetta="Ossidi non metallici")
+        metallo = S.miscela(S.matematica("MULTIPLY", m_cenere, S.valore(0.6, "rough", 24),
+                                         "rough", 24),
+                            metallo, S.valore(0.05, "rough", 24), "rough", 24, tipo="VALORE")
+        metallo = S.miscela(S.matematica("MULTIPLY", m_fuliggine, S.valore(0.6, "rough", 25),
+                                         "rough", 25),
+                            metallo, S.valore(0.15, "rough", 25), "rough", 25, tipo="VALORE")
+        metallo = S.miscela(S.matematica("MULTIPLY", vetro, S.valore(0.8, "rough", 26),
+                                         "rough", 26),
+                            metallo, S.valore(0.02, "rough", 26), "rough", 26, tipo="VALORE")
+    metallo = S.matematica("MAXIMUM", metallo, S.valore(0.0, "rough", 27), "rough", 27)
+    metallo = S.matematica("MINIMUM", metallo, S.valore(1.0, "rough", 28), "rough", 28)
+
+    # -------------------------------------------------------------- rilievo
+    altezza = S.matematica("ADD",
+                           S.matematica("MULTIPLY", n_macro.outputs["Fac"],
+                                        S.valore(0.55, "bump", 0), "bump", 0),
+                           S.matematica("MULTIPLY", n_meso.outputs["Fac"],
+                                        S.valore(0.45, "bump", 1), "bump", 1), "bump", 1)
+    altezza = S.matematica("SUBTRACT", altezza,
+                           S.matematica("MULTIPLY", n_grumo.outputs["Fac"],
+                                        S.valore(0.40, "bump", 20), "bump", 20), "bump", 20)
+    altezza = S.matematica("SUBTRACT", altezza,
+                           S.matematica("MULTIPLY", crepe, S.valore(0.85, "bump", 2),
+                                        "bump", 2), "bump", 2)
+    altezza = S.matematica("SUBTRACT", altezza,
+                           S.matematica("MULTIPLY", craquelure, S.valore(0.35, "bump", 3),
+                                        "bump", 3), "bump", 3)
+    if vaiolo_peso > 0.0:
+        altezza = S.matematica("SUBTRACT", altezza,
+                               S.matematica("MULTIPLY", vaioli, S.valore(0.55, "bump", 4),
+                                            "bump", 4), "bump", 4)
+    if scheggia_peso > 0.0:
+        altezza = S.matematica("SUBTRACT", altezza,
+                               S.matematica("MULTIPLY", schegge, S.valore(0.75, "bump", 5),
+                                            "bump", 5), "bump", 5)
+    if martell_peso > 0.0:
+        altezza = S.matematica("SUBTRACT", altezza,
+                               S.matematica("MULTIPLY", m_martello, S.valore(0.5, "bump", 6),
+                                            "bump", 6), "bump", 6)
+    if scaglia_peso > 0.0:
+        altezza = S.matematica("ADD", altezza,
+                               S.matematica("MULTIPLY", m_scaglia, S.valore(0.4, "bump", 7),
+                                            "bump", 7), "bump", 7)
+    if ruggine_peso > 0.0:
+        altezza = S.matematica("ADD", altezza,
+                               S.matematica("MULTIPLY", m_ruggine, S.valore(0.45, "bump", 8),
+                                            "bump", 8), "bump", 8)
+    altezza = S.matematica("ADD", altezza,
+                           S.matematica("MULTIPLY", n_micro.outputs["Fac"],
+                                        S.valore(0.18, "bump", 9), "bump", 9), "bump", 9)
+
+    bump_macro = S.nodo("ShaderNodeBump", "bump", 12, "Rilievo macro")
+    bump_macro.inputs["Strength"].default_value = rilievo
+    bump_macro.inputs["Distance"].default_value = rilievo_d
+    S.L(altezza, bump_macro.inputs["Height"])
+    bump_micro = S.nodo("ShaderNodeBump", "bump", 14, "Micro dettaglio")
+    bump_micro.inputs["Strength"].default_value = microrilievo
+    bump_micro.inputs["Distance"].default_value = microrilievo_d
+    S.L(n_micro.outputs["Fac"], bump_micro.inputs["Height"])
+    S.L(bump_macro.outputs["Normal"], bump_micro.inputs["Normal"])
+
+    # --------------------------------------------------------------- uscite
+    S.L(colore, bsdf.inputs["Base Color"])
+    S.L(ruv, bsdf.inputs["Roughness"])
+    S.L(metallo, bsdf.inputs["Metallic"])
+    S.L(bump_micro.outputs["Normal"], bsdf.inputs["Normal"])
+
+    if brace_peso > 0.0:
+        nucleo = S.rampa(crepe, [(0.55, 0.0), (0.95, 1.0)], "mask", 138, interp="EASE",
+                         etichetta="Nucleo incandescente")
+        S.costante(bsdf.inputs["Emission Color"], c_brace)
+        S.L(S.matematica("MULTIPLY", nucleo, S.valore(brace_peso, "mask", 139), "mask", 140,
+                         etichetta="Brace nelle crepe"),
+            bsdf.inputs["Emission Strength"])
+    else:
+        bsdf.inputs["Emission Strength"].default_value = 0.0
+
+    S.inquadra()
+    return S.mat
+
+
+# -----------------------------------------------------------------------------
+# Tavolozza comune e ricette dei singoli materiali
+#
+# Le scale dei domini sono espresse in "venature per metro": 0.5 ≈ chiazze da
+# due metri, 3.2 ≈ grana da 30 cm, 15 ≈ grit da 6-7 cm.  Le misure dei difetti
+# (crepe, craquelure, vaioli, schegge, martellatura, scaglie, graffi) invece
+# sono in metri e vengono convertite nella scala del dominio che le ospita, così
+# si può ritoccare la grana senza deformare i dettagli.  Le scale fini sono
+# calibrate sulla risoluzione di render del progetto (la porta occupa circa
+# 1700 px per 18 unità: ~90 px/unità), perché il micro-dettaglio resti visibile
+# senza scivolare sotto il pixel.
+# -----------------------------------------------------------------------------
+PIETRA_COMUNE = {
+    "col_profondo": (0.0085, 0.0090, 0.0115),
+    "col_base": (0.052, 0.050, 0.049),
+    "col_chiaro": (0.115, 0.110, 0.104),
+    "col_fresco": (0.098, 0.092, 0.085),
+    "col_crepa": (0.0022, 0.0022, 0.0028),
+    "col_cenere": (0.150, 0.138, 0.129),
+    "col_fuliggine": (0.0075, 0.0068, 0.0068),
+    "col_bruciato": (0.0050, 0.0042, 0.0042),
+    "col_scottatura": (0.058, 0.024, 0.013),
+}
+
+stone = materiale_eroso(
+    "Basalto vulcanico | eroso, crepato, coperto di cenere",
+    (0.080, 0.076, 0.072),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.0185, 0.0185, 0.0205),
+         col_base=(0.098, 0.092, 0.087),
+         col_chiaro=(0.208, 0.196, 0.182),
+         col_fresco=(0.172, 0.160, 0.146),
+         col_crepa=(0.0030, 0.0029, 0.0034),
+         col_cenere=(0.196, 0.180, 0.168),
+         col_scottatura=(0.080, 0.032, 0.017),
+         macro=(0.50, 6.0), meso=(3.23, 8.0), micro=(15.4, 3.0),
+         medio=(2.00, 7.0),
+         crepa=(1.29, 1.00, 0.097), craquelure=(0.167, 0.42, 0.0117),
+         vaioli=(0.061, 0.50), schegge=(0.099, 0.55),
+         bruciatura=(0.33, 0.62), cenere=0.46, fuliggine=0.42, usura=0.55,
+         rilievo=(0.95, 0.055), microrilievo=(0.20, 0.006),
+         ruvido=0.88, metallico=0.02, vetrificato=0.30, brace=0.05))
+
+stone_light = materiale_eroso(
+    "Tufo vulcanico | conci chiari e spigoli consumati",
+    (0.140, 0.132, 0.122),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.037, 0.036, 0.038),
+         col_base=(0.152, 0.143, 0.133),
+         col_chiaro=(0.285, 0.268, 0.246),
+         col_fresco=(0.240, 0.223, 0.203),
+         col_crepa=(0.0060, 0.0058, 0.0066),
+         col_cenere=(0.245, 0.226, 0.208),
+         macro=(0.58, 6.0), meso=(3.44, 8.0), micro=(16.8, 3.0),
+         medio=(2.20, 7.0),
+         crepa=(0.99, 0.85, 0.069), craquelure=(0.139, 0.38, 0.0097),
+         vaioli=(0.056, 0.42), schegge=(0.081, 0.70),
+         bruciatura=(0.35, 0.50), cenere=0.55, fuliggine=0.34, usura=0.72,
+         rilievo=(0.85, 0.048), microrilievo=(0.18, 0.005),
+         ruvido=0.84, metallico=0.02, vetrificato=0.22))
+
+stone_dark = materiale_eroso(
+    "Roccia carbonizzata | crosta sfaldata e crepe profonde",
+    (0.045, 0.042, 0.042),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.0085, 0.0078, 0.0082),
+         col_base=(0.057, 0.053, 0.053),
+         col_chiaro=(0.125, 0.117, 0.112),
+         col_fresco=(0.109, 0.100, 0.093),
+         col_crepa=(0.0016, 0.0015, 0.0017),
+         col_cenere=(0.150, 0.136, 0.128),
+         col_fuliggine=(0.0058, 0.0052, 0.0052),
+         col_bruciato=(0.0040, 0.0034, 0.0034),
+         col_scottatura=(0.062, 0.024, 0.012),
+         macro=(0.46, 7.0), meso=(2.99, 9.0), micro=(14.0, 3.0),
+         medio=(1.90, 7.0),
+         crepa=(1.74, 1.00, 0.165), craquelure=(0.204, 0.55, 0.0174),
+         vaioli=(0.067, 0.55), schegge=(0.134, 0.85),
+         bruciatura=(0.30, 0.85), cenere=0.36, fuliggine=0.60, usura=0.42,
+         rilievo=(1.05, 0.065), microrilievo=(0.22, 0.007),
+         ruvido=0.92, metallico=0.03, vetrificato=0.45, brace=0.16))
+
+stone_shadow = materiale_eroso(
+    "Basalto in ombra | fondo profondo e polveroso",
+    (0.030, 0.032, 0.038),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.0060, 0.0062, 0.0074),
+         col_base=(0.043, 0.044, 0.051),
+         col_chiaro=(0.095, 0.097, 0.107),
+         col_fresco=(0.074, 0.075, 0.081),
+         col_crepa=(0.0013, 0.0013, 0.0016),
+         col_cenere=(0.115, 0.107, 0.104),
+         macro=(0.44, 6.0), meso=(2.82, 8.0), micro=(12.6, 3.0),
+         medio=(1.80, 7.0),
+         crepa=(1.89, 0.80, 0.161), craquelure=(0.256, 0.35, 0.0179),
+         vaioli=(0.074, 0.35), schegge=(0.175, 0.45),
+         bruciatura=(0.30, 0.45), cenere=0.40, fuliggine=0.45, usura=0.30,
+         rilievo=(0.80, 0.045), microrilievo=(0.16, 0.005),
+         ruvido=0.94, metallico=0.02, vetrificato=0.20))
+
+iron = materiale_eroso(
+    "Ferro annerito | forgia, ossidi e fuliggine",
+    (0.055, 0.052, 0.050),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.0052, 0.0049, 0.0049),
+         col_base=(0.038, 0.036, 0.035),
+         col_chiaro=(0.100, 0.096, 0.092),
+         col_fresco=(0.086, 0.082, 0.078),
+         col_crepa=(0.0018, 0.0017, 0.0017),
+         col_cenere=(0.135, 0.124, 0.117),
+         col_fuliggine=(0.0058, 0.0053, 0.0053),
+         col_bruciato=(0.0042, 0.0037, 0.0037),
+         col_scottatura=(0.060, 0.022, 0.012),
+         col_ruggine=(0.095, 0.038, 0.017),
+         macro=(0.85, 6.0), meso=(4.18, 8.0), micro=(17.0, 3.0),
+         medio=(3.00, 7.0),
+         crepa=(0.45, 0.55, 0.030), craquelure=(0.110, 0.40, 0.020),
+         vaioli=(0.060, 0.00), schegge=(0.070, 0.32),
+         bruciatura=(0.40, 0.60), cenere=0.30, fuliggine=0.55, usura=0.75,
+         ruggine=0.42, graffi=(0.031, 0.35), martellatura=(0.14, 0.60), scaglie=(0.15, 0.60),
+         rilievo=(0.70, 0.030), microrilievo=(0.20, 0.004),
+         ruvido=0.62, metallico=0.94, vetrificato=0.20))
+
+iron_leaf = materiale_eroso(
+    "Ferro dei battenti | scaglie di forgia e colature di fuliggine",
+    (0.048, 0.045, 0.044),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.0046, 0.0044, 0.0044),
+         col_base=(0.034, 0.032, 0.031),
+         col_chiaro=(0.092, 0.088, 0.084),
+         col_fresco=(0.080, 0.076, 0.073),
+         col_crepa=(0.0016, 0.0015, 0.0015),
+         col_cenere=(0.115, 0.105, 0.099),
+         col_fuliggine=(0.0052, 0.0048, 0.0048),
+         col_bruciato=(0.0038, 0.0034, 0.0034),
+         col_scottatura=(0.055, 0.020, 0.011),
+         col_ruggine=(0.088, 0.035, 0.015),
+         macro=(0.70, 6.0), meso=(3.78, 8.0), micro=(16.0, 3.0),
+         medio=(2.80, 7.0),
+         crepa=(0.68, 0.75, 0.037), craquelure=(0.120, 0.42, 0.022),
+         vaioli=(0.060, 0.00), schegge=(0.085, 0.42),
+         bruciatura=(0.36, 0.72), cenere=0.28, fuliggine=0.66, usura=0.70,
+         ruggine=0.30, graffi=(0.035, 0.30), martellatura=(0.14, 0.68), scaglie=(0.14, 0.78),
+         rilievo=(0.80, 0.034), microrilievo=(0.20, 0.004),
+         ruvido=0.65, metallico=0.92, vetrificato=0.18, brace=0.05))
+
+bronze = materiale_eroso(
+    "Bronzo annerito | patina, ossidi e colature",
+    (0.080, 0.048, 0.024),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.0082, 0.0050, 0.0030),
+         col_base=(0.058, 0.034, 0.016),
+         col_chiaro=(0.185, 0.113, 0.047),
+         col_fresco=(0.150, 0.092, 0.038),
+         col_crepa=(0.0026, 0.0019, 0.0014),
+         col_cenere=(0.155, 0.135, 0.118),
+         col_fuliggine=(0.0062, 0.0050, 0.0042),
+         col_bruciato=(0.0044, 0.0034, 0.0028),
+         col_scottatura=(0.080, 0.032, 0.014),
+         col_ruggine=(0.060, 0.070, 0.042),
+         macro=(0.95, 6.0), meso=(4.62, 8.0), micro=(18.0, 3.0),
+         medio=(3.20, 7.0),
+         crepa=(0.35, 0.45, 0.026), craquelure=(0.100, 0.38, 0.018),
+         vaioli=(0.060, 0.00), schegge=(0.055, 0.30),
+         bruciatura=(0.42, 0.55), cenere=0.28, fuliggine=0.50, usura=0.90,
+         ruggine=0.34, graffi=(0.028, 0.30), martellatura=(0.13, 0.48), scaglie=(0.10, 0.55),
+         rilievo=(0.58, 0.022), microrilievo=(0.18, 0.003),
+         ruvido=0.48, metallico=0.90, vetrificato=0.15))
+
+gold = materiale_eroso(
+    "Ottone antico | iscrizioni annerite e spigoli lucidi",
+    (0.32, 0.19, 0.065),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.024, 0.0110, 0.0036),
+         col_base=(0.180, 0.102, 0.032),
+         col_chiaro=(0.520, 0.325, 0.114),
+         col_fresco=(0.430, 0.270, 0.094),
+         col_crepa=(0.0050, 0.0029, 0.0018),
+         col_cenere=(0.175, 0.148, 0.122),
+         col_fuliggine=(0.0092, 0.0068, 0.0046),
+         col_bruciato=(0.0058, 0.0040, 0.0027),
+         col_scottatura=(0.100, 0.038, 0.015),
+         col_ruggine=(0.078, 0.082, 0.048),
+         macro=(1.15, 6.0), meso=(4.20, 8.0), micro=(14.0, 3.0),
+         medio=(3.60, 7.0),
+         crepa=(0.24, 0.35, 0.018), craquelure=(0.090, 0.34, 0.016),
+         vaioli=(0.060, 0.00), schegge=(0.045, 0.28),
+         bruciatura=(0.48, 0.45), cenere=0.24, fuliggine=0.42, usura=0.95,
+         ruggine=0.22, graffi=(0.025, 0.35), martellatura=(0.11, 0.42), scaglie=(0.08, 0.42),
+         rilievo=(0.58, 0.020), microrilievo=(0.20, 0.004),
+         ruvido=0.40, metallico=0.92, vetrificato=0.12))
+
+bone = materiale_eroso(
+    "Osso consunto | avorio affumicato e screpolato",
+    (0.30, 0.255, 0.200),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.038, 0.031, 0.024),
+         col_base=(0.215, 0.176, 0.130),
+         col_chiaro=(0.470, 0.412, 0.312),
+         col_fresco=(0.395, 0.343, 0.258),
+         col_crepa=(0.011, 0.009, 0.007),
+         col_cenere=(0.205, 0.180, 0.157),
+         col_fuliggine=(0.013, 0.010, 0.009),
+         col_bruciato=(0.0090, 0.0074, 0.0065),
+         col_scottatura=(0.095, 0.045, 0.022),
+         macro=(1.90, 6.0), meso=(5.00, 9.0), micro=(14.0, 3.0),
+         medio=(4.50, 7.0),
+         crepa=(0.26, 0.30, 0.018), craquelure=(0.075, 0.55, 0.010),
+         vaioli=(0.050, 0.35), schegge=(0.050, 0.30),
+         bruciatura=(0.55, 0.50), cenere=0.28, fuliggine=0.45, usura=0.80,
+         rilievo=(0.62, 0.020), microrilievo=(0.22, 0.004),
+         ruvido=0.68, metallico=0.02, vetrificato=0.10))
+
+bone_shadow = materiale_eroso(
+    "Osso in ombra | teschio annerito dal fumo",
+    (0.14, 0.12, 0.095),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.016, 0.013, 0.011),
+         col_base=(0.090, 0.074, 0.055),
+         col_chiaro=(0.210, 0.178, 0.130),
+         col_fresco=(0.165, 0.138, 0.104),
+         col_crepa=(0.0050, 0.0040, 0.0034),
+         col_cenere=(0.145, 0.126, 0.111),
+         col_fuliggine=(0.0078, 0.0064, 0.0055),
+         col_bruciato=(0.0054, 0.0045, 0.0040),
+         col_scottatura=(0.070, 0.030, 0.015),
+         macro=(1.90, 6.0), meso=(5.00, 9.0), micro=(14.0, 3.0),
+         medio=(4.50, 7.0),
+         crepa=(0.26, 0.35, 0.018), craquelure=(0.075, 0.60, 0.010),
+         vaioli=(0.050, 0.35), schegge=(0.050, 0.30),
+         bruciatura=(0.55, 0.62), cenere=0.24, fuliggine=0.60, usura=0.70,
+         rilievo=(0.60, 0.018), microrilievo=(0.20, 0.004),
+         ruvido=0.72, metallico=0.02, vetrificato=0.10))
+
+void_mat = materiale_eroso(
+    "Vuoto | nero profondo e poroso",
+    (0.005, 0.005, 0.007),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.0011, 0.0011, 0.0015),
+         col_base=(0.0045, 0.0045, 0.0058),
+         col_chiaro=(0.013, 0.013, 0.016),
+         col_fresco=(0.010, 0.010, 0.012),
+         col_crepa=(0.0005, 0.0005, 0.0006),
+         col_cenere=(0.024, 0.023, 0.024),
+         col_fuliggine=(0.0015, 0.0014, 0.0015),
+         col_bruciato=(0.0011, 0.0010, 0.0011),
+         col_scottatura=(0.014, 0.005, 0.003),
+         macro=(0.60, 5.0), meso=(2.82, 7.0), micro=(12.6, 3.0),
+         medio=(1.80, 7.0),
+         crepa=(1.19, 0.50, 0.071), craquelure=(0.208, 0.25, 0.0104),
+         vaioli=(0.074, 0.20), schegge=(0.159, 0.20),
+         bruciatura=(0.30, 0.40), cenere=0.20, fuliggine=0.35, usura=0.20,
+         rilievo=(0.45, 0.020), microrilievo=(0.12, 0.003),
+         ruvido=0.90, metallico=0.05, vetrificato=0.10))
+
 def principled_material(name, base=(0.2, 0.2, 0.2, 1), metallic=0.0, roughness=0.6,
                         noise_scale=0.0, bump_strength=0.0, bump_distance=0.04,
                         color_low=None, color_high=None):
+    """Materiale semplice (vapori, fumo): interfaccia mantenuta per compatibilità."""
     mat = bpy.data.materials.new(name)
     mat.diffuse_color = base
     mat.use_nodes = True
@@ -96,44 +1164,6 @@ def principled_material(name, base=(0.2, 0.2, 0.2, 1), metallic=0.0, roughness=0
             links.new(tex.outputs["Fac"], bump.inputs["Height"])
             links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     return mat
-
-stone = principled_material(
-    "Basalto antico | venature e cenere", (0.16, 0.17, 0.19, 1), 0.12, 0.82,
-    5.2, 0.22, 0.11,
-    (0.045, 0.052, 0.067, 1), (0.29, 0.30, 0.31, 1))
-stone_light = principled_material(
-    "Pietra lunare | bordi consumati", (0.32, 0.30, 0.27, 1), 0.08, 0.77,
-    7.0, 0.16, 0.065,
-    (0.12, 0.13, 0.15, 1), (0.42, 0.39, 0.34, 1))
-stone_dark = principled_material(
-    "Basalto vitrificato", (0.055, 0.064, 0.079, 1), 0.3, 0.42,
-    8.0, 0.12, 0.035,
-    (0.018, 0.022, 0.033, 1), (0.16, 0.12, 0.11, 1))
-iron = principled_material(
-    "Ferro battuto | nero ossidato", (0.065, 0.075, 0.086, 1), 0.82, 0.32,
-    15.0, 0.1, 0.018,
-    (0.018, 0.026, 0.035, 1), (0.17, 0.13, 0.09, 1))
-bronze = principled_material(
-    "Bronzo annerito", (0.22, 0.105, 0.042, 1), 0.82, 0.29,
-    18.0, 0.08, 0.012,
-    (0.055, 0.026, 0.012, 1), (0.42, 0.22, 0.075, 1))
-gold = principled_material(
-    "Ottone antico | iscrizioni", (0.65, 0.36, 0.105, 1), 0.8, 0.27,
-    22.0, 0.035, 0.01,
-    (0.18, 0.075, 0.018, 1), (0.92, 0.61, 0.22, 1))
-bone = principled_material(
-    "Osso consunto", (0.52, 0.43, 0.31, 1), 0.04, 0.72,
-    10.0, 0.12, 0.025,
-    (0.19, 0.15, 0.11, 1), (0.73, 0.63, 0.46, 1))
-bone_shadow = principled_material(
-    "Osso in ombra", (0.22, 0.18, 0.14, 1), 0.16, 0.62,
-    11.0, 0.08, 0.02,
-    (0.08, 0.065, 0.055, 1), (0.34, 0.26, 0.17, 1))
-void_mat = principled_material("Vuoto | nero profondo", (0.004, 0.003, 0.008, 1), 0.05, 0.3)
-stone_shadow = principled_material(
-    "Basalto in ombra | fondo profondo", (0.028, 0.031, 0.040, 1), 0.2, 0.9,
-    6.0, 0.25, 0.09,
-    (0.012, 0.014, 0.020, 1), (0.10, 0.10, 0.11, 1))
 
 
 def emission_material(name, color, strength=1.0):
@@ -184,34 +1214,27 @@ pl.new(pnoise.outputs["Fac"], pramp.inputs["Fac"])
 pl.new(pramp.outputs["Color"], pem.inputs["Color"])
 pl.new(pem.outputs["Emission"], pout.inputs["Surface"])
 
-lava_mat = principled_material(
-    "Lava | crosta nera e vene rosse", (0.25, 0.025, 0.006, 1), 0.25, 0.31,
-    4.5, 0.18, 0.035,
-    (0.012, 0.006, 0.009, 1), (0.58, 0.055, 0.006, 1))
-# Add emission to the lava's fissure-like high-frequency texture.
-lnodes = lava_mat.node_tree.nodes
-llinks = lava_mat.node_tree.links
-lbsdf = next(n for n in lnodes if n.type == "BSDF_PRINCIPLED")
-ltex = next(n for n in lnodes if n.type == "TEX_NOISE")
-lramp = next(n for n in lnodes if n.type == "VALTORGB")
-lem = lnodes.new("ShaderNodeEmission")
-lem.location = (340, -360)
-lem.inputs["Strength"].default_value = 1.15
-lmask = lnodes.new("ShaderNodeValToRGB")
-lmask.location = (-100, -300)
-lmask.color_ramp.elements[0].position = 0.55
-lmask.color_ramp.elements[0].color = (0, 0, 0, 1)
-lmask.color_ramp.elements[1].position = 0.73
-lmask.color_ramp.elements[1].color = (1, 0.18, 0.012, 1)
-llinks.new(ltex.outputs["Fac"], lmask.inputs["Fac"])
-llinks.new(lmask.outputs["Color"], lem.inputs["Color"])
-# Keep the stone surface and a subtle self-lit molten seam in the same material.
-ladd = lnodes.new("ShaderNodeAddShader")
-ladd.location = (560, -40)
-llinks.new(lbsdf.outputs["BSDF"], ladd.inputs[0])
-llinks.new(lem.outputs["Emission"], ladd.inputs[1])
-lout = next(n for n in lnodes if n.type == "OUTPUT_MATERIAL")
-llinks.new(ladd.outputs["Shader"], lout.inputs["Surface"])
+lava_mat = materiale_eroso(
+    "Lava | crosta nera, vene incandescenti e cenere",
+    (0.10, 0.020, 0.006),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.0026, 0.0016, 0.0016),
+         col_base=(0.020, 0.011, 0.009),
+         col_chiaro=(0.075, 0.030, 0.014),
+         col_fresco=(0.060, 0.024, 0.011),
+         col_crepa=(0.0010, 0.0007, 0.0007),
+         col_cenere=(0.095, 0.082, 0.078),
+         col_fuliggine=(0.0040, 0.0022, 0.0020),
+         col_bruciato=(0.0024, 0.0014, 0.0013),
+         col_scottatura=(0.140, 0.030, 0.010),
+         col_brace=(1.0, 0.20, 0.014),
+         macro=(0.55, 7.0), meso=(2.60, 9.0), micro=(11.2, 3.0),
+         medio=(1.60, 7.0),
+         crepa=(0.70, 1.00, 0.112), craquelure=(0.275, 0.65, 0.0385),
+         vaioli=(0.083, 0.70), schegge=(0.226, 0.55),
+         bruciatura=(0.30, 0.70), cenere=0.22, fuliggine=0.30, usura=0.25,
+         rilievo=(1.00, 0.060), microrilievo=(0.22, 0.007),
+         ruvido=0.78, metallico=0.05, vetrificato=0.55, brace=1.35))
 
 # -----------------------------------------------------------------------------
 # Geometry helpers
@@ -929,7 +1952,7 @@ for side in (-1, 1):
         local_x = leaf*(INNER_A-abs(px))
         outline.append((local_x, pz))
     add_extruded_polygon("Battente scolpito | sinistro" if side < 0 else "Battente scolpito | destro",
-                         outline, -0.27, 0.23, iron, bevel=0.03, parent=root)
+                         outline, -0.27, 0.23, iron_leaf, bevel=0.03, parent=root)
     # Recessed plates sit proud of the door leaf and catch the orange edge light.
     for row, zc in enumerate((1.60, 3.00, 4.42)):
         add_box(f"Pannello ribassato {side:+d}.{row+1}", (leaf*1.31, -0.292, zc),
@@ -944,7 +1967,7 @@ for side in (-1, 1):
         add_box(f"Spranga di rinforzo {side:+d}.{band_i+1}",
                 (leaf*width*0.5, -0.385, zc), (width, 0.145, 0.17), bronze, 0.035, parent=root)
         add_box(f"Battuta in ferro {side:+d}.{band_i+1}",
-                (leaf*width*0.5, -0.474, zc), (width-0.12, 0.055, 0.07), iron, 0.018, parent=root)
+                (leaf*width*0.5, -0.474, zc), (width-0.12, 0.055, 0.07), iron_leaf, 0.018, parent=root)
         for col in range(7):
             lx = leaf*(0.20 + col*(width-0.40)/6)
             add_uv_sphere(f"Ribattino {side:+d}.{band_i+1}.{col+1}",
@@ -990,7 +2013,7 @@ for side in (-1, 1):
     # Three massive strap hinges at the outer edge.
     for h_i, zc in enumerate((1.40, 3.52, 5.70)):
         add_box(f"Bandella del cardine {side:+d}.{h_i+1}",
-                (leaf*0.13, -0.50, zc), (0.58, 0.095, 0.14), iron, 0.025, parent=root)
+                (leaf*0.13, -0.50, zc), (0.58, 0.095, 0.14), iron_leaf, 0.025, parent=root)
         add_cylinder(f"Barilotto del cardine {side:+d}.{h_i+1}",
                      (leaf*0.025, -0.53, zc), 0.105, 0.78, bronze, vertices=16,
                      bevel=0.02, parent=root)
@@ -1309,6 +2332,9 @@ scene.cycles.device = "CPU"
 scene.cycles.samples = 48
 scene.cycles.preview_samples = 16
 scene.cycles.use_denoising = True
+# Prefiltro accurato: con il micro-dettaglio dei materiali il filtro veloce
+# spiana i rilievi fini proprio dove la roccia dovrebbe essere più ruvida.
+scene.cycles.denoising_prefilter = "ACCURATE"
 scene.cycles.denoiser = "OPENIMAGEDENOISE"
 scene.render.resolution_x = 1500
 scene.render.resolution_y = 1740
@@ -1378,8 +2404,10 @@ bpy.context.scene.cursor.location = (0,0,0)
 
 # Save a full-quality Blender project, then render a lightweight preview image.
 bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
+# L'anteprima usa lo stesso numero di campioni del render finale: con meno
+# campioni il denoiser è costretto a spianare il micro-dettaglio dei materiali.
 scene.render.resolution_percentage = 68
-scene.cycles.samples = 22
+scene.cycles.samples = 48
 scene.render.filepath = PREVIEW_PATH
 bpy.ops.render.render(write_still=True)
 # Restore production settings and save once more so opening the project is ready for a final render.
