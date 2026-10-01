@@ -130,6 +130,10 @@ bone_shadow = principled_material(
     11.0, 0.08, 0.02,
     (0.08, 0.065, 0.055, 1), (0.34, 0.26, 0.17, 1))
 void_mat = principled_material("Vuoto | nero profondo", (0.004, 0.003, 0.008, 1), 0.05, 0.3)
+stone_shadow = principled_material(
+    "Basalto in ombra | fondo profondo", (0.028, 0.031, 0.040, 1), 0.2, 0.9,
+    6.0, 0.25, 0.09,
+    (0.012, 0.014, 0.020, 1), (0.10, 0.10, 0.11, 1))
 
 
 def emission_material(name, color, strength=1.0):
@@ -308,6 +312,22 @@ def add_rod(name, a, b, radius, material, vertices=10, parent=None, collection=N
     return obj
 
 
+def add_torus(name, location, major_radius, minor_radius, material, rotation=(0,0,0),
+              parent=None, collection=None, major_segments=20, minor_segments=8):
+    bpy.ops.mesh.primitive_torus_add(major_segments=major_segments, minor_segments=minor_segments,
+                                     location=location, major_radius=major_radius,
+                                     minor_radius=minor_radius)
+    obj = bpy.context.object
+    obj.name = name
+    obj.rotation_euler = rotation
+    if material:
+        obj.data.materials.append(material)
+    if parent:
+        obj.parent = parent
+    link_object(obj, collection)
+    return obj
+
+
 def add_curve(name, points, radius, material, cyclic=False, parent=None,
               resolution=2, collection=None):
     data = bpy.data.curves.new(name + " | curva", "CURVE")
@@ -410,8 +430,8 @@ world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.009, 0.01
 world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.22
 
 # Ground plane and volcanic slabs.
-add_box("Basamento | lastra infernale", (0, -1.2, -0.22), (13.2, 10.5, 0.42), stone_dark, 0.12)
-add_box("Pianoro di basalto", (0, -7.6, -0.36), (36, 25, 0.28), stone_dark, 0.05)
+add_box("Basamento | lastra infernale", (0, -1.2, -0.22), (17.6, 11.5, 0.42), stone_dark, 0.12)
+add_box("Pianoro di basalto", (0, -7.6, -0.36), (42, 26, 0.28), stone_dark, 0.05)
 # Large irregular flagstones in the foreground, aligned as a broken processional path.
 for row in range(5):
     yy = -3.25 - row * 1.33
@@ -426,11 +446,12 @@ for row in range(5):
                        random.choice([stone_dark, stone, stone]), 0.055)
         slab.rotation_euler[2] = random.uniform(-0.025, 0.025)
 
-# Three broad, worn steps. Their dark edges catch the molten spill from the portal.
+# Four broad, worn steps. Their dark edges catch the molten spill from the portal.
 for i, (yy, width, zz, thick) in enumerate([
-        (-0.82, 6.5, 0.16, 0.34), (-1.57, 6.9, 0.34, 0.34), (-2.32, 7.3, 0.52, 0.36)]):
+        (-0.82, 8.6, 0.16, 0.34), (-1.57, 9.2, 0.34, 0.34),
+        (-2.32, 9.8, 0.52, 0.36), (-3.07, 10.4, 0.70, 0.38)]):
     add_box(f"Gradino cerimoniale {i+1}", (0, yy, zz), (width, 0.92, thick),
-            stone_light if i == 2 else stone, 0.09)
+            stone_light if i == 3 else stone, 0.09)
     add_box(f"Filo in ottone del gradino {i+1}", (0, yy-0.43, zz+thick*0.36),
             (width-0.22, 0.035, 0.025), bronze, 0.01)
 
@@ -455,45 +476,94 @@ for i in range(38):
             random.choice([ember, flame_orange]), subdivisions=1)
 
 # -----------------------------------------------------------------------------
-# Main masonry: coursed ashlar, piers, plinths and a massive upper crown
+# Main masonry: monumental facade, nested pointed orders, towers and carvings
 # -----------------------------------------------------------------------------
 use_collection("01 • Architettura | basalto e conci")
-# Side walls built from hand-sized, subtly irregular stone blocks.
-for side in (-1, 1):
-    for row in range(10):
-        zc = 0.52 + row * 0.99
-        for col in range(2):
-            xbase = 4.14 + col * 1.22 + (0.17 if row % 2 else 0.0)
-            if xbase > 5.35:
+
+# Nested pointed (Gothic) orders: three concentric archivolts, each stepped
+# forward so raking light carves deep shadows between them. Asymmetric scars:
+# one missing voussoir in the outer order, a master crack across the left haunch.
+ORD2_IN = (4.13, 5.25, 10.75)
+ORD2_OUT = (4.97, 5.35, 11.85)
+ORD3_IN = (5.63, 5.05, 12.10)
+ORD3_OUT = (6.47, 5.15, 13.20)
+
+def add_order(tag, inner, outer, y0, y1, skip=()):
+    for side in (-1, 1):
+        for i in range(15):
+            if (side, i) in skip:
                 continue
-            xc = side * xbase
-            wid = random.uniform(0.99, 1.21)
-            dep = random.uniform(0.72, 0.95)
-            obj = add_box(f"Concio laterale {side:+d}.{row+1:02d}.{col+1}",
-                          (xc, -0.03 + random.uniform(-0.05, 0.04), zc),
-                          (wid, dep, random.uniform(0.89, 1.0)),
-                          random.choice([stone, stone, stone_light, stone_dark]), 0.055)
-            obj.rotation_euler[1] = random.uniform(-0.012, 0.012)
-    # Outer buttress pilasters articulate the facade silhouette.
-    x = side * 5.42
-    add_box(f"Contrafforte esterno {side:+d}", (x, -0.49, 5.1), (0.36, 0.55, 10.15),
-            stone_light, 0.075)
-    for z in (0.62, 4.82, 9.72):
-        add_box(f"Listello del contrafforte {side:+d} @ {z:.1f}", (x, -0.82, z),
-                (0.62, 0.24, 0.22), stone, 0.045)
+            t0 = i / 15.0 + 0.005
+            t1 = (i + 1) / 15.0 - 0.005
+            outline = [arch_point(t0, *inner, side), arch_point(t1, *inner, side),
+                       arch_point(t1, *outer, side), arch_point(t0, *outer, side)]
+            add_extruded_polygon(f"Ordine {tag} | concio {side:+d}.{i+1:02d}", outline,
+                                 y0, y1,
+                                 random.choice([stone_light, stone_light, stone, stone_light]),
+                                 bevel=0.03)
+        lin = arch_points(inner[0]-0.05, inner[1], inner[2]-0.03, side, steps=72)
+        add_curve(f"Ordine {tag} | gola interna {side:+d}",
+                  [(x, y0-0.05, z) for x, z in lin], 0.045, bronze, resolution=3)
+        lout = arch_points(outer[0]+0.02, outer[1]+0.01, outer[2]+0.03, side, steps=72)
+        add_curve(f"Ordine {tag} | cordone esterno {side:+d}",
+                  [(x, y0-0.02, z) for x, z in lout], 0.07, stone_light, resolution=3)
 
-# Upper spandrel wall over the outer arch, dressed as large cut blocks.
-for row in range(2):
-    zc = 10.08 + row * 0.78
-    for col in range(7):
-        xc = -4.98 + col * 1.66 + (0.18 if row % 2 else 0)
-        if xc > 5.15:
+add_order(2, ORD2_IN, ORD2_OUT, -1.30, -0.94)
+add_order(3, ORD3_IN, ORD3_OUT, -1.62, -1.30, skip={(-1, 7)})
+
+# Deep shadow wall behind the orders: the facade reads as solid mass, not frame.
+add_box("Fondo d'ombra | parete profonda", (0, -0.62, 11.30), (9.9, 0.5, 4.0), stone_shadow, 0.06)
+# Coursed joints carved across the spandrel mass.
+for jz in (9.75, 10.60, 11.45, 12.30, 13.15):
+    add_box(f"Giunto corso del fondo {jz:.2f}", (0, -0.885, jz), (9.7, 0.06, 0.05), stone_dark, 0.01)
+
+def niche_outline(cx, cz, w, drop, top):
+    r = arch_points(w, cz, cz+top, side=1, steps=10)
+    l = arch_points(w, cz, cz+top, side=-1, steps=10)
+    return ([(cx-w, cz-drop), (cx+w, cz-drop)] +
+            [(cx+x, z) for x, z in r] +
+            [(cx+x, z) for x, z in reversed(l)][1:])
+
+# Ragged teeth hanging from the mass bottom edge: erosion, not a clean line.
+for k, jx in enumerate((-4.3, -3.1, -1.6, 0.4, 1.9, 3.4, 4.5)):
+    add_box(f"Dente pendente del fondo {k+1}",
+            (jx, -0.80, 9.30-random.uniform(0.12, 0.44)),
+            (random.uniform(0.5, 0.9), 0.42, random.uniform(0.3, 0.62)),
+            random.choice([stone, stone_dark]), 0.04)
+
+# Blind arcade: two staggered rows of deeply carved pointed niches (asymmetric).
+for row, zc in enumerate((9.90, 11.15)):
+    off = 0.26 if row else -0.18
+    for k in range(-4, 5):
+        xx = k*1.08 + off
+        if abs(xx) > 4.55:
             continue
-        add_box(f"Concio del coronamento {row+1}.{col+1}",
-                (xc, -0.02, zc), (1.58, 0.86, 0.72),
-                random.choice([stone, stone_light, stone]), 0.06)
+        add_arch_fill(f"Nicchia cieca {row+1}.{k+5}", niche_outline(xx, zc, 0.46, 0.62, 0.72),
+                      -0.885, void_mat)
+        fr = arch_points(0.56, zc, zc+0.80, side=1, steps=10)
+        fl = arch_points(0.56, zc, zc+0.80, side=-1, steps=10)
+        pts = [(xx+x, -0.93, z) for x, z in reversed(fl)] + [(xx+x, -0.93, z) for x, z in fr][1:]
+        add_curve(f"Cornice della nicchia {row+1}.{k+5}", pts, 0.05, stone, resolution=2)
 
-# Load-bearing piers flanking the opening.
+# Chevron incision chasing the second order: a carved zigzag of shadow.
+chev = []
+for j in range(41):
+    t = j / 40.0
+    x, z = arch_point(t, 4.55, 5.30, 11.30, -1)
+    chev.append((x, -1.34 if j % 2 else -1.44, z))
+for side in (-1, 1):
+    pts = [(-p[0], p[1], p[2]) for p in chev] if side > 0 else chev
+    add_curve(f"Chevron inciso nell'ordine {side:+d}", pts, 0.042, stone_dark, resolution=1)
+
+# Master crack: a diagonal scar from the outer order down through the haunch.
+add_curve("Fenditura maestra | attraverso l'ordine",
+          [(-5.9, -1.66, 12.2), (-5.2, -1.58, 11.3), (-4.6, -1.48, 10.5),
+           (-4.2, -1.40, 9.6), (-3.9, -1.34, 8.9)], 0.035, stone_dark, resolution=2)
+add_curve("Fenditura maestra | ramo",
+          [(-4.6, -1.48, 10.5), (-4.1, -1.44, 10.9), (-3.6, -1.38, 11.3)],
+          0.024, stone_dark, resolution=1)
+
+# Load-bearing piers flanking the opening (inner order).
 for side in (-1, 1):
     add_box(f"Piede del pilone {side:+d}", (side*3.60, -0.48, 0.58),
             (1.05, 1.1, 1.08), stone_light, 0.09)
@@ -507,15 +577,123 @@ for side in (-1, 1):
     add_box(f"Cornice del capitello {side:+d}", (side*3.60, -0.55, 5.42),
             (1.08, 0.92, 0.18), gold, 0.035)
 
+# Massive clustered columns: four engaged shafts around a core, deep flutes,
+# heavy capitals carrying the second order.
+for side in (-1, 1):
+    cx = side*4.55
+    add_box(f"Plinto del pilastro {side:+d}", (cx, -0.55, 0.55), (1.66, 1.52, 1.06),
+            stone_light, 0.09)
+    add_box(f"Anima del pilastro {side:+d}", (cx, -0.55, 3.02), (0.94, 0.94, 4.9),
+            stone, 0.05)
+    for q, (dx, dy) in enumerate([(-0.40, -0.40), (0.40, -0.40), (-0.40, 0.30), (0.40, 0.30)]):
+        add_cylinder(f"Colonnetta impegnata {side:+d}.{q+1}", (cx+dx, -0.55+dy, 3.05),
+                     0.26, 4.95, stone_light, vertices=12, bevel=0.02)
+        if dy < 0:
+            add_box(f"Scanalatura profonda {side:+d}.{q+1}", (cx+dx, -1.19, 3.05),
+                    (0.075, 0.10, 4.5), stone_dark, 0.012)
+    add_cone(f"Cappa del capitello {side:+d}", (cx, -0.55, 5.02), 0.62, 0.88, 0.46,
+             stone, vertices=8)
+    add_box(f"Gola del capitello {side:+d}", (cx, -0.62, 5.22), (1.42, 1.44, 0.10),
+            bronze, 0.02)
+    add_box(f"Abaco del pilastro {side:+d}", (cx, -0.58, 5.40), (1.70, 1.52, 0.34),
+            stone_light, 0.05)
+    add_ico(f"Maschera consunta del pilastro {side:+d}", (cx, -1.30, 5.40),
+            (0.20, 0.10, 0.16), bone_shadow, subdivisions=1)
+
+# Shoulder walls between columns and towers: irregular courses, one settled run.
+for side in (-1, 1):
+    for row in range(12):
+        zc = 0.62 + row * 1.02
+        if zc > 12.6:
+            break
+        settled = (side == 1 and row in (6, 7, 8))
+        dx, dz, rot = (0.16, -0.19, 0.030) if settled else (0.0, 0.0, random.uniform(-0.012, 0.012))
+        b = add_box(f"Concio di spalla {side:+d}.{row+1:02d}",
+                    (side*5.35 + dx, -0.35, zc + dz), (1.06, 0.95, 0.94),
+                    random.choice([stone, stone_light, stone, stone_dark]), 0.06)
+        b.rotation_euler[1] = rot
+
+# Asymmetric buttress towers: left one taller and broken, right one lower,
+# leaning and crowned by a wind-tilted spire. Built to outlast millennia.
+TOWERS = {-1: {"top": 14.0, "broken": True, "lean": 0.0},
+          1: {"top": 12.6, "broken": False, "lean": 0.013}}
+for side, spec in TOWERS.items():
+    tx = side*6.75
+    lean = spec["lean"]
+    widths = [2.02, 1.82, 1.62, 1.42]
+    zbounds = [0.0, 5.0, 9.3, 13.1, 99.0]
+    for s_i in range(4):
+        z0 = zbounds[s_i]
+        if z0 >= spec["top"]:
+            break
+        z1 = min(zbounds[s_i+1], spec["top"])
+        h = z1 - z0
+        zc = z0 + h/2
+        shift = side*lean*zc*2.2
+        b = add_box(f"Torre {side:+d} | tronco {s_i+1}", (tx+shift, -0.75, zc),
+                    (widths[s_i], 2.00, h), stone if s_i % 2 else stone_light, 0.07)
+        b.rotation_euler[1] = side*lean + random.uniform(-0.005, 0.005)
+        # deep horizontal groove at each setback
+        add_box(f"Torre {side:+d} | gola del ritiro {s_i+1}", (tx+shift, -1.78, z1),
+                (widths[s_i]+0.18, 0.14, 0.17), stone_dark, 0.02)
+        # vertical corner incisions
+        for cside in (-1, 1):
+            add_box(f"Torre {side:+d} | incisione d'angolo {s_i+1}.{cside:+d}",
+                    (tx+shift+cside*widths[s_i]*0.42, -1.76, zc),
+                    (0.07, 0.08, h-0.25), stone_dark, 0.01)
+        # rune-like dashes carved in the face
+        for k in range(3):
+            rz = z0 + 0.8 + k*1.15 + random.uniform(-0.15, 0.15)
+            if rz > z1 - 0.4:
+                continue
+            add_box(f"Torre {side:+d} | tacca {s_i+1}.{k+1}",
+                    (tx+shift+random.uniform(-0.35, 0.35), -1.77, rz),
+                    (random.uniform(0.16, 0.34), 0.07, 0.09), stone_dark, 0.01)
+    if spec["broken"]:
+        for k, (dx, h, tilt) in enumerate([(-0.45, 2.0, -0.16), (0.05, 1.2, 0.05),
+                                           (0.5, 2.5, 0.22)]):
+            s = add_cone(f"Torre {side:+d} | dente di rovina {k+1}",
+                         (tx+dx, -0.75, spec["top"]+h/2-0.25), 0.32, 0.05, h,
+                         stone, vertices=5)
+            s.rotation_euler[1] = tilt
+        add_ico(f"Torre {side:+d} | cavità del crollo", (tx+0.1, -1.05, spec["top"]-0.15),
+                (0.52, 0.36, 0.30), void_mat, subdivisions=1)
+        for k in range(6):
+            add_ico(f"Maceria della torre {side:+d}.{k+1}",
+                    (tx+random.uniform(-1.5, 1.5), random.uniform(-2.4, -1.0), 0.14),
+                    (random.uniform(0.16, 0.40), random.uniform(0.16, 0.38),
+                     random.uniform(0.12, 0.30)),
+                    random.choice([stone_dark, stone]), subdivisions=1)
+    else:
+        add_box(f"Torre {side:+d} | cornice sommitale",
+                (tx+side*lean*spec["top"]*2.2, -0.80, spec["top"]+0.16),
+                (1.52, 1.82, 0.32), stone_light, 0.05)
+        p = add_cone(f"Torre {side:+d} | guglia inclinata",
+                     (tx+side*lean*spec["top"]*2.2, -0.80, spec["top"]+1.45),
+                     0.62, 0.0, 2.3, stone, vertices=8)
+        p.rotation_euler[1] = 0.06
+        p.rotation_euler[0] = -0.035
+
+# Flying buttress: intact on the left, collapsed stub on the right.
+fly = [(-6.75, -0.75, 10.6), (-6.30, -0.75, 11.3), (-5.70, -0.75, 11.9), (-5.35, -0.75, 12.4)]
+add_curve("Arco rampante | sinistro", fly, 0.20, stone, resolution=3)
+add_curve("Arco rampante | nervatura sinistra",
+          [(x, y-0.20, z+0.17) for x, y, z in fly], 0.07, stone_light, resolution=3)
+add_curve("Arco rampante | destro spezzato",
+          [(6.75, -0.75, 10.4), (6.45, -0.75, 10.9)], 0.20, stone, resolution=3)
+frag = add_ico("Frammento dell'arco caduto", (5.55, -1.95, 0.34), (0.55, 0.40, 0.30),
+               stone, subdivisions=1)
+frag.rotation_euler = (0.3, 0.5, 0.8)
+
 # Heavy plinth across the facade and a narrow moulding with carved dentils.
-add_box("Zoccolo continuo del portale", (0, -0.39, 0.46), (10.9, 0.95, 0.84), stone_light, 0.1)
-add_box("Cimasa inferiore | bronzo scuro", (0, -0.91, 0.90), (10.7, 0.13, 0.12), bronze, 0.025)
-for i in range(25):
-    x = -5.1 + i * 0.425
+add_box("Zoccolo continuo del portale", (0, -0.39, 0.46), (15.9, 0.95, 0.84), stone_light, 0.1)
+add_box("Cimasa inferiore | bronzo scuro", (0, -0.91, 0.90), (15.7, 0.13, 0.12), bronze, 0.025)
+for i in range(37):
+    x = -7.65 + i * 0.425
     add_box(f"Dentello del plinto {i+1:02d}", (x, -0.91, 1.03), (0.22, 0.10, 0.11),
             stone, 0.018)
 
-# The pointed archivolt is assembled from individually bevelled voussoirs.
+# The pointed archivolt (inner order) is assembled from bevelled voussoirs.
 # The dark reveal gives the arch real depth; the keystone locks the two halves.
 for side in (-1, 1):
     for i in range(13):
@@ -530,7 +708,6 @@ for side in (-1, 1):
                              -0.94, 0.10,
                              random.choice([stone, stone, stone_light, stone_dark]),
                              bevel=0.025)
-    # Incised inner arris and the outer gilded fillet follow the stone curve.
     inner_line = arch_points(INNER_A-0.045, INNER_SPRING, INNER_TOP-0.02,
                              side, steps=72)
     add_curve(f"Archivolto interno | filetto {side:+d}",
@@ -568,43 +745,87 @@ for sx in (-1, 1):
     add_uv_sphere("Occhio della chiave di volta", (sx*0.105, -1.265, 9.055),
                   (0.052, 0.035, 0.055), eye_glow, segments=12, rings=8)
 
-# Cornices, broken gothic crown, and a sculptural trident finial.
-add_box("Architrave | mensola alta", (0, -0.49, 10.87), (10.9, 1.0, 0.38), stone_light, 0.075)
-add_box("Fascia d'ombra dell'architrave", (0, -0.98, 10.63), (10.7, 0.16, 0.13), bronze, 0.025)
-# Broad triangular gable in front of the upper masonry.
-front_gable = [(-5.25, 10.98), (5.25, 10.98), (0.0, 12.22)]
-add_extruded_polygon("Frontone spezzato", front_gable, -0.74, -0.13, stone, bevel=0.055)
-# Inner triangular recessed panel and mouldings.
-add_extruded_polygon("Timpano | campo inciso",
-                     [(-3.55, 11.10), (3.55, 11.10), (0.0, 11.96)],
-                     -0.82, -0.73, stone_dark, bevel=0.02)
-for side in (-1, 1):
-    add_curve(f"Cornice inclinata del timpano {side:+d}",
-              [((0.0 if side < 0 else 0.0), -0.91, 11.99),
-               (side*1.65, -0.91, 11.60), (side*3.55, -0.91, 11.10),
-               (side*5.10, -0.91, 10.99)], 0.075, gold, resolution=3)
-# Two slender pinnacles with stepped bases and spear-shaped caps.
-for side in (-1, 1):
-    x = side*4.78
-    add_box(f"Pinnacolo | base {side:+d}", (x, -0.87, 11.18), (0.78, 0.65, 0.42), stone_light, 0.055)
-    add_cylinder(f"Fusto del pinnacolo {side:+d}", (x, -0.84, 11.88), 0.23, 1.18,
-                 stone, vertices=8, bevel=0.025)
-    add_cone(f"Freccia del pinnacolo {side:+d}", (x, -0.84, 12.68), 0.33, 0.0, 0.88,
-             stone_light, vertices=8)
-    add_uv_sphere(f"Nodo dorato del pinnacolo {side:+d}", (x, -0.88, 11.65),
-                  (0.3, 0.09, 0.3), bronze, segments=16, rings=8)
-# Central three-pronged, blackened-iron crest.
-add_rod("Asta del tridente", (0, -0.92, 11.55), (0, -0.92, 12.78), 0.075, iron, 12)
+# -----------------------------------------------------------------------------
+# Crown: cornice, incised frieze, broken pediment, rose window, pinnacles
+# -----------------------------------------------------------------------------
+add_box("Architrave | mensola alta", (0, -0.72, 14.30), (13.6, 1.35, 0.44), stone_light, 0.08)
+add_box("Fascia d'ombra dell'architrave", (0, -1.42, 14.02), (13.4, 0.16, 0.15), bronze, 0.025)
+# Frieze of deep glyphs: irregular widths and depths, hand-carved and worn.
+for i in range(40):
+    x = -6.15 + i * 0.315 + random.uniform(-0.025, 0.025)
+    d = random.uniform(0.05, 0.14)
+    add_box(f"Glifo inciso del fregio {i+1:02d}", (x, -1.40-d*0.5, 14.28),
+            (random.uniform(0.12, 0.20), d, random.uniform(0.16, 0.32)), stone_dark, 0.012)
+# Spandrel courses over the outer order.
+for row in range(2):
+    zc = 14.66 + row * 0.76
+    for col in range(9):
+        xc = -6.6 + col * 1.65 + (0.2 if row % 2 else 0)
+        if abs(xc) > 6.9:
+            continue
+        add_box(f"Concio del coronamento {row+1}.{col+1}", (xc, -0.05, zc),
+                (1.56, 0.9, 0.7), random.choice([stone, stone_light, stone]), 0.06)
+# Gable field behind the broken pediment.
+add_extruded_polygon("Campo del frontone",
+                     [(-6.2, 15.40), (6.2, 15.40), (-0.15, 16.95)],
+                     -0.35, -0.12, stone, bevel=0.05)
+# Broken pediment: two raking cornices of different heights that never meet.
+add_extruded_polygon("Frontone spezzato | rampa sinistra",
+                     [(-6.2, 15.40), (-1.35, 17.30), (-1.35, 17.84), (-6.2, 15.98)],
+                     -0.74, -0.30, stone_light, bevel=0.055)
+add_extruded_polygon("Frontone spezzato | rampa destra",
+                     [(6.2, 15.40), (6.2, 15.98), (1.05, 17.26), (1.05, 16.74)],
+                     -0.74, -0.30, stone, bevel=0.055)
+for side, tip in ((-1, (-1.35, 17.57)), (1, (1.05, 17.00))):
+    add_curve(f"Cornice inclinata del frontone {side:+d}",
+              [(side*6.05, -0.80, 15.56), (side*3.4, -0.80, 16.40),
+               (tip[0], -0.80, tip[1])], 0.075, gold, resolution=3)
+# Rose window in the pediment field: ring, dark void, gilded spokes, bone hub.
+add_uv_sphere("Disco della rosa | vuoto", (-0.15, -0.30, 16.10), (1.00, 0.10, 1.00),
+              void_mat, segments=24, rings=12)
+add_torus("Anello della rosa", (-0.15, -0.42, 16.10), 1.04, 0.10, stone_light,
+          rotation=(math.pi/2, 0, 0))
+add_torus("Anello interno della rosa", (-0.15, -0.46, 16.10), 0.62, 0.05, bronze,
+          rotation=(math.pi/2, 0, 0))
+for k in range(12):
+    a = k * math.tau / 12
+    add_rod(f"Raggio della rosa {k+1}",
+            (-0.15+math.cos(a)*0.10, -0.44, 16.10+math.sin(a)*0.10),
+            (-0.15+math.cos(a)*0.98, -0.44, 16.10+math.sin(a)*0.98),
+            0.028, gold, 6)
+add_ico("Mozzo della rosa | teschio", (-0.15, -0.50, 16.10), (0.16, 0.10, 0.17),
+        bone_shadow, subdivisions=2)
+# Pinnacles: left one a broken stump, right one intact but weary.
+x = -5.9
+add_box("Pinnacolo spezzato | base", (x, -0.87, 14.70), (0.82, 0.68, 0.44), stone_light, 0.055)
+st = add_cylinder("Pinnacolo spezzato | moncone", (x, -0.84, 15.16), 0.24, 0.72,
+                  stone, vertices=8, bevel=0.025)
+st.rotation_euler[1] = -0.05
+sh = add_cone("Pinnacolo spezzato | scheggia", (x-0.10, -0.84, 15.56), 0.16, 0.0, 0.5,
+              stone_dark, vertices=5)
+sh.rotation_euler[1] = -0.3
+x = 5.9
+add_box("Pinnacolo | base", (x, -0.87, 14.70), (0.82, 0.68, 0.44), stone_light, 0.055)
+add_cylinder("Fusto del pinnacolo", (x, -0.84, 15.40), 0.23, 1.18, stone, vertices=8,
+             bevel=0.025)
+pn_ = add_cone("Freccia del pinnacolo", (x, -0.84, 16.20), 0.33, 0.0, 0.95, stone_light,
+               vertices=8)
+pn_.rotation_euler[1] = 0.045
+add_uv_sphere("Nodo dorato del pinnacolo", (x, -0.88, 15.17), (0.3, 0.09, 0.3), bronze,
+              segments=16, rings=8)
+# Central three-pronged, blackened-iron crest rising through the pediment gap.
+add_rod("Asta del tridente", (-0.15, -0.62, 16.90), (-0.15, -0.62, 18.10), 0.075, iron, 12)
 for s in (-1, 0, 1):
-    start = (s*0.04, -0.92, 12.0)
-    midp = (s*0.34, -0.92, 12.38 if s else 12.55)
-    end = (s*0.52, -0.92, 12.93)
+    start = (-0.15+s*0.04, -0.62, 17.35)
+    midp = (-0.15+s*0.34, -0.62, 17.73 if s else 17.90)
+    end = (-0.15+s*0.52, -0.62, 18.28)
     add_curve(f"Dente del tridente {s+2}", [start, midp, end], 0.065, iron, resolution=3)
 
-# Inscription plaque and Dante's warning in raised, aged brass.
-add_box("Targa della sentenza", (0, -0.99, 10.55), (7.92, 0.19, 0.72), stone_dark, 0.055)
-add_box("Cornice della targa", (0, -1.11, 10.55), (7.68, 0.055, 0.57), bronze, 0.045)
-add_box("Campo della targa", (0, -1.145, 10.55), (7.48, 0.035, 0.43), stone_dark, 0.028)
+# Inscription plaque and Dante's warning in raised, aged brass — slightly askew,
+# resettled by centuries of tremors.
+add_box("Targa della sentenza", (0.12, -1.66, 14.05), (8.8, 0.19, 0.78), stone_dark, 0.055)
+add_box("Cornice della targa", (0.12, -1.78, 14.05), (8.56, 0.055, 0.62), bronze, 0.045)
+add_box("Campo della targa", (0.12, -1.815, 14.05), (8.36, 0.035, 0.48), stone_dark, 0.028)
 
 def add_text(name, body, location, size, material, align="CENTER", extrude=0.012):
     data = bpy.data.curves.new(name + " | caratteri", "FONT")
@@ -619,41 +840,26 @@ def add_text(name, body, location, size, material, align="CENTER", extrude=0.012
     obj = bpy.data.objects.new(name, data)
     ACTIVE.objects.link(obj)
     obj.location = location
-    obj.rotation_euler = (math.pi/2, 0, 0)
+    obj.rotation_euler = (math.pi/2, 0, 0.010)
     data.materials.append(material)
     return obj
 
 add_text("Avvertimento | Lasciate ogni speranza", "LASCIATE OGNI SPERANZA, VOI CH'ENTRATE",
-         (0, -1.205, 10.56), 0.29, gold, extrude=0.015)
+         (0.12, -1.875, 14.06), 0.32, gold, extrude=0.015)
 # Small rosettes at the corners of the inscription.
 for side in (-1, 1):
-    add_ico(f"Rosone della targa {side:+d}", (side*3.66, -1.21, 10.55),
+    add_ico(f"Rosone della targa {side:+d}", (0.12+side*4.08, -1.88, 14.05),
             (0.11, 0.055, 0.11), gold, subdivisions=2)
     for a in range(8):
         ang = a * math.tau / 8
-        add_uv_sphere("Petalo del rosone", (side*3.66 + math.cos(ang)*0.10, -1.235,
-                                              10.55 + math.sin(ang)*0.10),
+        add_uv_sphere("Petalo del rosone", (0.12+side*4.08 + math.cos(ang)*0.10, -1.905,
+                                              14.05 + math.sin(ang)*0.10),
                       (0.025, 0.016, 0.025), bronze, segments=8, rings=6)
+
 
 # -----------------------------------------------------------------------------
 # Doors: hinged, partly open iron leaves with relief, straps and skull bosses
 # -----------------------------------------------------------------------------
-def add_torus(name, location, major_radius, minor_radius, material, rotation=(0,0,0),
-              parent=None, collection=None, major_segments=20, minor_segments=8):
-    bpy.ops.mesh.primitive_torus_add(major_segments=major_segments, minor_segments=minor_segments,
-                                     location=location, major_radius=major_radius,
-                                     minor_radius=minor_radius)
-    obj = bpy.context.object
-    obj.name = name
-    obj.rotation_euler = rotation
-    if material:
-        obj.data.materials.append(material)
-    if parent:
-        obj.parent = parent
-    link_object(obj, collection)
-    return obj
-
-
 def add_skull_relief(name, x, y, z, size, parent=None, collection=None,
                      skull_mat=bone, glow=True):
     col = collection or ACTIVE
@@ -834,14 +1040,14 @@ for side in (-1, 1):
         x = side*(2.92 + strand*0.22)
         for i in range(15):
             z = 7.76 - i*0.33
-            y = -0.46 + (0.08 if strand else 0.0)
+            y = -1.05 + (0.08 if strand else 0.0)
             rot = (math.pi/2, 0, 0) if i % 2 == 0 else (math.pi/2, 0, math.pi/2)
             add_torus(f"Catena della soglia {side:+d}.{strand+1}.{i+1:02d}",
                       (x, y, z), 0.12, 0.032, iron, rotation=rot,
                       major_segments=16, minor_segments=6)
     # A small broken chain drapes diagonally over the threshold.
-    pts = [(side*2.85,-0.58,7.65),(side*2.55,-0.72,7.32),
-           (side*2.30,-0.82,7.02),(side*2.14,-0.88,6.82)]
+    pts = [(side*2.85,-1.16,7.65),(side*2.55,-1.24,7.32),
+           (side*2.30,-1.28,7.02),(side*2.14,-1.32,6.82)]
     add_curve(f"Catena spezzata | tratto {side:+d}", pts, 0.06, bronze, resolution=3)
 
 # -----------------------------------------------------------------------------
@@ -876,8 +1082,8 @@ def add_robe_mesh(name, cx, cy, z_base, ringspec, material):
 
 
 def guardian(side):
-    x = side*4.58
-    y = -1.10
+    x = side*5.45
+    y = -1.30
     out = -1 if side < 0 else 1
     label = "Custode dell'Antinferno | sinistro" if side < 0 else "Custode dell'Antinferno | destro"
     # Pedestal: carved, battered, and pinned to the approach.
@@ -919,7 +1125,7 @@ def guardian(side):
             end = (start[0]+direction*0.025, start[1]-0.015, start[2]-0.19)
             add_rod(label + " | falange", start, end, 0.024, bone, vertices=7)
     # Tattered bat-wing relief on the outer side; slender ribs emerge from the shroud.
-    wing_y = -0.81
+    wing_y = -1.95
     wing_outline = [
         (x+out*0.23,2.98),(x+out*0.48,3.25),(x+out*0.76,3.18),
         (x+out*1.24,3.05),(x+out*1.06,3.70),(x+out*1.52,4.02),
@@ -958,19 +1164,21 @@ for side in (-1,1):
 # Skull-faced braziers and torch sconces warm the carved masonry.
 use_collection("04 • Oltretomba | fuoco, lava, catene")
 for side in (-1,1):
-    x = side*3.92
-    add_box(f"Mensola del braciere {side:+d}", (x,-1.05,5.62), (0.66,0.50,0.23), stone_light, 0.055)
-    add_cylinder(f"Stelo del braciere {side:+d}", (x,-1.10,6.02), 0.105,0.68,
+    x = side*3.60
+    add_rod(f"Mensola | braccio di sostegno {side:+d}", (x,-0.95,5.40), (x,-1.50,5.60),
+            0.05, iron, 8)
+    add_box(f"Mensola del braciere {side:+d}", (x,-1.50,5.62), (0.66,0.50,0.23), stone_light, 0.055)
+    add_cylinder(f"Stelo del braciere {side:+d}", (x,-1.55,6.02), 0.105,0.68,
                  iron, vertices=12, bevel=0.02)
-    add_torus(f"Anello inferiore del braciere {side:+d}", (x,-1.10,5.82),
+    add_torus(f"Anello inferiore del braciere {side:+d}", (x,-1.55,5.82),
               0.21,0.035,bronze, major_segments=16, minor_segments=6)
-    add_ico(f"Coppa cranica del braciere {side:+d}", (x,-1.10,6.38),
+    add_ico(f"Coppa cranica del braciere {side:+d}", (x,-1.55,6.38),
             (0.40,0.30,0.22), bronze, subdivisions=1)
-    add_skull_relief(f"Maschera del braciere {side:+d}", x,-1.40,6.42,0.54,
+    add_skull_relief(f"Maschera del braciere {side:+d}", x,-1.85,6.42,0.54,
                      skull_mat=bone_shadow,glow=False)
     for fi in range(3):
         flame_shape(f"Fiamma del braciere {side:+d}.{fi+1}",
-                    x+(fi-1)*0.13,-1.14,6.48,0.23,random.uniform(0.55,1.15),
+                    x+(fi-1)*0.13,-1.59,6.48,0.23,random.uniform(0.55,1.15),
                     [flame_orange,ember,flame_red][fi],lean=random.uniform(-0.10,0.10))
     # Point lights are warm but restrained; the portal remains the focal point.
     ld = bpy.data.lights.new(f"Luce del braciere {side:+d}", "POINT")
@@ -979,7 +1187,7 @@ for side in (-1,1):
     ld.shadow_soft_size = 0.55
     lo = bpy.data.objects.new(f"Luce del braciere {side:+d}", ld)
     ACTIVE.objects.link(lo)
-    lo.location = (x,-1.5,6.9)
+    lo.location = (x,-1.95,6.9)
 
 # -----------------------------------------------------------------------------
 # Surface accents: cracks on the stones, rosettes and tiny damned faces
@@ -1014,28 +1222,33 @@ for side in (-1,1):
 use_collection("04 • Oltretomba | fuoco, lava, catene")
 # Low silhouette of broken basalt teeth behind the monument.
 for side in (-1,1):
-    for i in range(4):
-        x = side*(6.8 + i*1.05)
-        h = random.uniform(4.0,8.0)
+    for i in range(5):
+        x = side*(8.6 + i*1.2)
+        h = random.uniform(5.0,11.0)
         add_cone(f"Dente di basalto lontano {side:+d}.{i+1}",
-                 (x,2.4, h*0.5-0.15), random.uniform(0.55,0.95), 0.0, h,
+                 (x,2.4, h*0.5-0.15), random.uniform(0.65,1.15), 0.0, h,
                  stone_dark, vertices=5)
 # A dim blood-red atmospheric plane behind the far silhouette.
 backdrop_mat = emission_material("Orizzonte | cenere rossa", (0.028,0.004,0.012), 0.45)
-add_box("Fondale dell'abisso", (0,5.2,5.8), (60,0.18,28), backdrop_mat, 0.0)
+add_box("Fondale dell'abisso", (0,5.2,8.5), (66,0.18,36), backdrop_mat, 0.0)
 
 # Smoke-like curls rising from the broken lintel and the burning threshold.
 smoke_mat = principled_material("Fumo | cenere fredda", (0.11,0.075,0.10,1), 0.0, 0.92,
                                 3.0,0.12,0.07,(0.025,0.018,0.04,1),(0.24,0.15,0.16,1))
+# Smoke escapes the collapsed crown of the left tower and the burning threshold.
+for i in range(3):
+    x = -6.55 + i*0.42
+    z0 = 13.6 + i*0.25
+    pts = [(x,-0.75,z0),(x-0.25,-0.60,z0+0.55),(x+0.10,-0.45,z0+1.05),
+           (x-0.35,-0.30,z0+1.55),(x-0.60,-0.15,z0+1.95)]
+    add_curve(f"Vapore d'ombra | torre spezzata {i+1}", pts,
+              0.03 + i*0.008, smoke_mat, resolution=3)
 for side in (-1,1):
-    for i in range(3):
-        x = side*(2.8 + i*0.58)
-        z0 = 7.9 + i*0.2
-        pts = [(x,-0.16,z0),(x+side*0.20,-0.05,z0+0.45),
-               (x-side*0.12,0.05,z0+0.92),(x+side*0.30,0.02,z0+1.35),
-               (x+side*0.54,0.11,z0+1.65)]
-        add_curve(f"Vapore d'ombra {side:+d}.{i+1}", pts,
-                  0.025 + i*0.008, smoke_mat, resolution=3)
+    x = side*2.95
+    z0 = 5.4
+    pts = [(x,-1.85,z0),(x+side*0.22,-1.75,z0+0.5),(x-side*0.10,-1.65,z0+0.95),
+           (x+side*0.30,-1.55,z0+1.4),(x+side*0.55,-1.45,z0+1.7)]
+    add_curve(f"Vapore d'ombra | soglia {side:+d}", pts, 0.03, smoke_mat, resolution=3)
 
 use_collection("05 • Scena | terreno, camera, luci")
 
@@ -1052,20 +1265,21 @@ def add_area_light(name, location, target, energy, color, size, shape="DISK"):
     return obj
 
 # Cool moonlight carves the basalt; hot light leaks from inside the gate.
-add_area_light("Luna | luce principale", (-8.0,-11.0,15.0), (0,0,5.4),
-               1850, (0.60,0.72,1.0), 8.0)
-add_area_light("Riflesso cremisi | lato destro", (8.0,-7.0,8.0), (0,0,4.7),
-               1300, (1.0,0.23,0.10), 7.0)
-add_area_light("Luce di taglio | blu abissale", (3.0,3.0,12.5), (0,0,6.0),
-               2100, (0.15,0.28,1.0), 6.0)
-add_area_light("Luce alta | pietra e frontone", (-1.0,1.0,17.0), (0,0,7.0),
-               950, (0.72,0.54,0.35), 5.5)
+add_area_light("Luna | luce principale", (-9.5,-12.5,17.5), (0,0,7.4),
+               2600, (0.60,0.72,1.0), 9.0)
+add_area_light("Riflesso cremisi | lato destro", (9.5,-8.0,9.0), (0,0,5.5),
+               1700, (1.0,0.23,0.10), 8.0)
+add_area_light("Luce di taglio | blu abissale", (3.5,3.5,15.0), (0,0,8.0),
+               2800, (0.15,0.28,1.0), 7.0)
+add_area_light("Luce alta | pietra e frontone", (-1.0,1.0,20.0), (0,0,10.0),
+               1250, (0.72,0.54,0.35), 6.0)
 
 for name, location, energy, color, radius in [
     ("Cuore della soglia", (0,1.45,3.2), 850, (1.0,0.075,0.018), 1.9),
-    ("Lava riflessa sui gradini", (0,-2.3,1.1), 320, (1.0,0.12,0.018), 2.2),
-    ("Rimbalzo rosso sulle ali", (-4.2,-1.5,3.4), 150, (0.9,0.06,0.018), 1.3),
-    ("Rimbalzo rosso sulle ali | dx", (4.2,-1.5,3.4), 150, (0.9,0.06,0.018), 1.3),
+    ("Lava riflessa sui gradini", (0,-2.6,1.1), 300, (1.0,0.12,0.018), 2.4),
+    ("Rimbalzo rosso sulle ali", (-5.3,-1.9,3.4), 170, (0.9,0.06,0.018), 1.3),
+    ("Rimbalzo rosso sulle ali | dx", (5.3,-1.9,3.4), 170, (0.9,0.06,0.018), 1.3),
+    ("Brace della torre spezzata", (-6.7,-1.4,13.4), 120, (1.0,0.10,0.02), 1.1),
 ]:
     data = bpy.data.lights.new(name,"POINT")
     data.energy = energy
@@ -1079,8 +1293,8 @@ for name, location, energy, color, radius in [
 cam_data = bpy.data.cameras.new("Camera | soglia dei dannati")
 cam = bpy.data.objects.new("Camera | soglia dei dannati",cam_data)
 ACTIVE.objects.link(cam)
-cam.location = (8.2,-29.0,13.1)
-target = Vector((0.0,-0.10,6.0))
+cam.location = (9.8,-32.0,10.8)
+target = Vector((0.0,-0.30,9.4))
 cam.rotation_euler = (target-Vector(cam.location)).to_track_quat("-Z","Y").to_euler()
 cam_data.lens = 50
 cam_data.dof.use_dof = True
@@ -1134,15 +1348,15 @@ nt.links.new(glow.outputs["Image"],comp.inputs["Image"])
 scene["Opera"] = "La Porta dell'Inferno — interpretazione originale da Inferno, Canto III"
 scene["Iscrizione"] = "Lasciate ogni speranza, voi ch'entrate"
 scene["Nota"] = "Modello procedurale: architettura, battenti, rilievi e materiali sono modificabili."
-scene["Dimensioni indicative"] = "circa 12,4 x 13,0 x 5,5 unità Blender"
+scene["Dimensioni indicative"] = "circa 15,0 x 18,5 x 6,0 unità Blender"
 
 # Make the project pleasant to inspect immediately after opening in Blender.
 for screen in bpy.data.screens:
     for area in screen.areas:
         if area.type == "VIEW_3D":
             space = area.spaces.active
-            space.region_3d.view_location = (0.0,-0.1,5.9)
-            space.region_3d.view_distance = 23.5
+            space.region_3d.view_location = (0.0,-0.1,8.6)
+            space.region_3d.view_distance = 28.0
             space.region_3d.view_rotation = cam.rotation_euler.to_quaternion()
             space.region_3d.view_perspective = "PERSP"
             space.shading.type = "SOLID"
