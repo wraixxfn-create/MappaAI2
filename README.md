@@ -59,7 +59,7 @@ Le superfici principali condividono il generatore **`materiale_eroso`**, con ric
 
 Le crepe di shader sono ora più fini, per lasciare leggibili gli intagli e le fratture geometriche. Le maschere di distanza **in metri** vengono normalizzate con `Map Range` prima di `ColorRamp`; la curvatura `Pointiness` distingue correttamente cavità e spigoli attorno a **0,5**. I grafi conservano i riquadri etichettati nello Shader Editor.
 
-Luce lunare fredda, fuoco della soglia e un tenue riempimento neutro rendono leggibili i bassorilievi senza appiattire le ombre. L'ottone dell'iscrizione ha una grana più fine per preservare la leggibilità del testo.
+L'illuminazione è drammatica e cinematografica: la fonte principale è il calore rosso/arancio che esce dalla porta e dalle crepe incandescenti, mentre l'ambiente porta solo una debole luce fredda di contrasto (vedi sotto). L'ottone dell'iscrizione ha una grana più fine per preservare la leggibilità del testo.
 
 ## Calore infernale integrato nella struttura
 
@@ -68,7 +68,17 @@ Il monumento non è più solo *illuminato* dal fuoco: il calore nasce **dentro**
 - **Vene incandescenti tra i conci**: fessure di magma con gola bruciata corrono nei giunti dei piloni, delle pareti di spalla, nei giunti radiali dell'archivolto interno, nelle torri e nello zoccolo. Il materiale `Magma | vena incandescente tra i conci` varia colore lungo ogni vena (crosta scura → rosso → arancio vivo) con rumore in coordinate mondo.
 - **Lava nelle profondità della porta**: oltre la soglia, un lago di lava con croste nere e vene vive (`Lava | crosta nera…`) riempie il tunnel fra i battenti socchiusi; colate fuse scendono dalle pareti interne e una `Parete fusa` emissiva chiude la profondità, visibile nello spiraglio fra le ante. Un rivolo di lava oltrepassa la soglia e scende sui gradini cerimoniali.
 - **Piccole fuoriuscite di fuoco**: lingue di fiamma e nuclei d'oro nascono dove le vene raggiungono la superficie, con faville sospese e veli di fumo caldo.
-- **Illuminazione fisica**: ogni vena, specchio di lava e fuoriuscita ha una luce puntiforme dedicata (12 nuove luci arancio/rosso) e l'emissione del magma partecipa al GI; con `diffuse_bounces = 4` il bagliore rimbalza realisticamente sul basalto, producendo riflessi caldi sui conci, sul ferro dei battenti e sui gradini.
+- **Illuminazione fisica**: ogni vena, specchio di lava e fuoriuscita ha una luce puntiforme dedicata (12 luci arancio/rosso) e l'emissione del magma partecipa al GI; con `diffuse_bounces = 4` il bagliore rimbalza realisticamente sul basalto, producendo riflessi caldi sui conci, sul ferro dei battenti e sui gradini.
+
+## Illuminazione cinematografica
+
+La scena è trattata come un set cinematografico notturno, con una gerarchia precisa tra le fonti:
+
+- **Fonte principale dall'interno della porta**: il *Cuore della soglia* e la *Vampa dell'abisso* (5200 W) sono ora la chiave della scena; la luce rossa e arancione esce dai battenti socchiusi, bagna i gradini, il ferro e la pietra del portale.
+- **Crepe incandescenti come sorgenti**: ogni vena di magma (piloni, spalle, archivolto, torri) ha una luce dedicata con energia triplicata; l'emissione del magma sale a 10 e la parete fusa nelle profondità a 6,5, così ogni giunto ardente disegna il proprio alone sulla pietra.
+- **Debole luce fredda d'ambiente**: la luna (1100 W, blu) e il taglio blu abissale (650 W) restano solo per il contrasto cromatico caldo/freddo, senza competere con la chiave. I riempimenti neutri sono stati rimossi: le ombre sono profonde e nessuna luce lava i neri.
+- **Volumetric fog**: la foschia di cenere è più densa (0,0060) e più anisotropa (0,52); le luci fredde hanno *Volume Scatter* spento, quindi il fumo si accende solo del calore rosso/arancio della soglia e delle crepe, con il bagliore che si diffonde come alone volumetrico.
+- **Strong rim lighting**: due area light fredde fuori campo (4500 e 2200 W) tracciano i profili di corona, frontone e torre spezzata, mentre il controluce caldo della lava (12000 W) borda le rupi sullo sfondo: la sagoma scura si stacca netta dal bagliore.
 
 ## Ambiente infernale
 
