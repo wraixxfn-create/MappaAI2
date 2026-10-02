@@ -8,8 +8,8 @@ Modello 3D originale ispirato all'**Inferno, Canto III** di Dante: portale gotic
 
 Apri **`porta_dell_inferno.blend`** in Blender **4.5 o successivo**. La scena è già inquadrata; premi **F12** per il render finale.
 
-- **3.313 oggetti**, organizzati in **6 collezioni**; le piccole primitive condividono le mesh per mantenere il progetto leggero.
-- **22 materiali** inclusi, senza texture, font o librerie esterne da scaricare.
+- **3.430 oggetti**, organizzati in **6 collezioni**; le piccole primitive condividono le mesh per mantenere il progetto leggero.
+- **25 materiali** inclusi, senza texture, font o librerie esterne da scaricare.
 - Render finale: **Cycles CPU, 2000 × 2320 px, 128 campioni massimi**, adaptive sampling e denoise accurato.
 - **4 camere**: inquadratura principale e dettagli di battenti, corona/trafori e custode. Seleziona una camera di dettaglio nell'Outliner e premi **Ctrl + Numpad 0**.
 - I battenti sono figli degli empty **Cardine del battente sinistro/destro**: ruotali su **Z** per cambiare l'apertura. Anche i nuovi intagli, le anime in rilievo e le serrature seguono il cardine.
@@ -61,6 +61,15 @@ Le crepe di shader sono ora più fini, per lasciare leggibili gli intagli e le f
 
 Luce lunare fredda, fuoco della soglia e un tenue riempimento neutro rendono leggibili i bassorilievi senza appiattire le ombre. L'ottone dell'iscrizione ha una grana più fine per preservare la leggibilità del testo.
 
+## Calore infernale integrato nella struttura
+
+Il monumento non è più solo *illuminato* dal fuoco: il calore nasce **dentro** la pietra.
+
+- **Vene incandescenti tra i conci**: fessure di magma con gola bruciata corrono nei giunti dei piloni, delle pareti di spalla, nei giunti radiali dell'archivolto interno, nelle torri e nello zoccolo. Il materiale `Magma | vena incandescente tra i conci` varia colore lungo ogni vena (crosta scura → rosso → arancio vivo) con rumore in coordinate mondo.
+- **Lava nelle profondità della porta**: oltre la soglia, un lago di lava con croste nere e vene vive (`Lava | crosta nera…`) riempie il tunnel fra i battenti socchiusi; colate fuse scendono dalle pareti interne e una `Parete fusa` emissiva chiude la profondità, visibile nello spiraglio fra le ante. Un rivolo di lava oltrepassa la soglia e scende sui gradini cerimoniali.
+- **Piccole fuoriuscite di fuoco**: lingue di fiamma e nuclei d'oro nascono dove le vene raggiungono la superficie, con faville sospese e veli di fumo caldo.
+- **Illuminazione fisica**: ogni vena, specchio di lava e fuoriuscita ha una luce puntiforme dedicata (12 nuove luci arancio/rosso) e l'emissione del magma partecipa al GI; con `diffuse_bounces = 4` il bagliore rimbalza realisticamente sul basalto, producendo riflessi caldi sui conci, sul ferro dei battenti e sui gradini.
+
 ## Rigenera la scena
 
 Con Blender installato, dalla cartella del progetto:
@@ -101,4 +110,4 @@ blender --background --python tests/validate_scene.py -- \
   --blend porta_dell_inferno.blend --compare-generated .cache/verifica/porta_dell_inferno.blend
 ```
 
-Scena generata e verificata con **Blender 4.5.14 LTS**.
+Scena generata e verificata con **Blender 4.5 LTS** (edizione corrente: `bpy` 4.5.9 come modulo Python; il progetto resta compatibile con Blender 4.5+).

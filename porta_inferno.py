@@ -2940,6 +2940,227 @@ for side in (-1, 1):
 
 
 # -----------------------------------------------------------------------------
+# Infernal heat fused into the structure: incandescent veins between the
+# stones, a lava lake in the depth of the doorway, small fire outbursts.
+# Emissive magma plus physical point lights let Cycles spread orange/red
+# reflections and warm indirect bounce over the surrounding basalt.
+# -----------------------------------------------------------------------------
+use_collection("04 • Oltretomba | fuoco, lava, catene")
+
+# Magma running between the stones: world-space noise varies the color along
+# every vein, so each crack mixes glowing core, hot orange and cooling crust.
+hot_vein = bpy.data.materials.new("Magma | vena incandescente tra i conci")
+hot_vein.use_nodes = True
+hn = hot_vein.node_tree.nodes
+hl = hot_vein.node_tree.links
+hn.clear()
+hout = hn.new("ShaderNodeOutputMaterial")
+hout.location = (620, 0)
+hem = hn.new("ShaderNodeEmission")
+hem.location = (380, 0)
+hem.inputs["Strength"].default_value = 8.0
+hgeo = hn.new("ShaderNodeNewGeometry")
+hgeo.location = (-900, 30)
+hnoi = hn.new("ShaderNodeTexNoise")
+hnoi.location = (-640, 30)
+hnoi.inputs["Scale"].default_value = 3.1
+hnoi.inputs["Detail"].default_value = 8.0
+hnoi.inputs["Roughness"].default_value = 0.78
+hnoi.inputs["Distortion"].default_value = 0.85
+hl.new(hgeo.outputs["Position"], hnoi.inputs["Vector"])
+hram = hn.new("ShaderNodeValToRGB")
+hram.location = (-220, 40)
+hram.color_ramp.elements[0].position = 0.32
+hram.color_ramp.elements[0].color = (0.14, 0.004, 0.004, 1)
+hmid = hram.color_ramp.elements.new(0.60)
+hmid.color = (0.88, 0.07, 0.006, 1)
+hram.color_ramp.elements[2].position = 0.86
+hram.color_ramp.elements[2].color = (1.0, 0.50, 0.07, 1)
+hl.new(hnoi.outputs["Fac"], hram.inputs["Fac"])
+hl.new(hram.outputs["Color"], hem.inputs["Color"])
+hl.new(hem.outputs["Emission"], hout.inputs["Surface"])
+
+# The molten wall glimpsed far beyond the lava lake, in the depth of the door.
+deep_lava = bpy.data.materials.new("Lava | parete fusa nelle profondità")
+deep_lava.use_nodes = True
+dn = deep_lava.node_tree.nodes
+dl = deep_lava.node_tree.links
+dn.clear()
+dout = dn.new("ShaderNodeOutputMaterial")
+dout.location = (650, 0)
+dem = dn.new("ShaderNodeEmission")
+dem.location = (420, 0)
+dem.inputs["Strength"].default_value = 4.8
+dco = dn.new("ShaderNodeTexCoord")
+dco.location = (-640, 30)
+dnoi = dn.new("ShaderNodeTexNoise")
+dnoi.location = (-420, 30)
+dnoi.inputs["Scale"].default_value = 2.6
+dnoi.inputs["Detail"].default_value = 7.0
+dnoi.inputs["Roughness"].default_value = 0.75
+dnoi.inputs["Distortion"].default_value = 1.2
+dl.new(dco.outputs["Generated"], dnoi.inputs["Vector"])
+dram = dn.new("ShaderNodeValToRGB")
+dram.location = (-60, 50)
+dram.color_ramp.elements[0].position = 0.14
+dram.color_ramp.elements[0].color = (0.30, 0.006, 0.010, 1)
+dmid = dram.color_ramp.elements.new(0.52)
+dmid.color = (0.95, 0.11, 0.008, 1)
+dram.color_ramp.elements[2].position = 0.86
+dram.color_ramp.elements[2].color = (1.0, 0.55, 0.10, 1)
+dl.new(dnoi.outputs["Fac"], dram.inputs["Fac"])
+dl.new(dram.outputs["Color"], dem.inputs["Color"])
+dl.new(dem.outputs["Emission"], dout.inputs["Surface"])
+
+heat_smoke = principled_material("Fumo | calore velato", (0.13, 0.075, 0.07, 1), 0.0, 0.94,
+                                 2.6, 0.10, 0.06, (0.030, 0.016, 0.014, 1), (0.26, 0.15, 0.12, 1))
+
+def giunto_caldo(name, points, radius=0.013):
+    """Incandescent fissure: charred groove in the stone plus a magma core."""
+    groove = [(x, y + 0.004, z) for x, y, z in points]
+    add_curve(name + " | gola bruciata", groove, radius * 2.6, stone_dark, resolution=1)
+    offset = radius * 2.6 + 0.006
+    core = [(x, y - offset, z) for x, y, z in points]
+    add_curve(name, core, radius, hot_vein, resolution=2)
+
+# Fire outbursts are anchored to the veins themselves; collected while the
+# cracks are placed, then built as one consistent family.
+sfiati = []
+
+# Piers: heat climbs the horizontal joints of the load-bearing blocks.
+for side in (-1, 1):
+    rng = stable_rng(f"vene del pilone {side:+d}")
+    joints = sorted(rng.sample([1.91, 2.82, 3.70], 2))
+    for ji, zc in enumerate(joints):
+        pts = [(side * (3.16 + 0.88 * k / 4), -0.802, zc + rng.uniform(-0.035, 0.035))
+               for k in range(5)]
+        giunto_caldo(f"Vena del pilone {side:+d}.{ji+1}", pts, 0.013)
+    xv = side * (3.60 + rng.uniform(-0.26, 0.26))
+    zv = rng.choice([1.91, 2.82, 3.70])
+    giunto_caldo(f"Vena corta del pilone {side:+d}",
+                 [(xv, -0.802, zv - 0.30),
+                  (xv + rng.uniform(-0.05, 0.05), -0.806, zv + 0.04),
+                  (xv + rng.uniform(-0.03, 0.03), -0.802, zv + 0.36)], 0.011)
+    sfiati.append((side * 3.60, -0.80, joints[0]))
+
+# Shoulder walls: long glowing cracks along the joints between courses.
+for side in (-1, 1):
+    rng = stable_rng(f"vene della spalla {side:+d}")
+    rows = sorted(rng.sample(range(1, 11), 3))
+    for ri, row in enumerate(rows):
+        zb = 0.62 + row * 1.02
+        xs = [side * (5.35 - 0.42 + 0.84 * k / 3) for k in range(4)]
+        pts = [(x + rng.uniform(-0.02, 0.02), -0.826, zb + rng.uniform(-0.035, 0.035))
+               for x in xs]
+        giunto_caldo(f"Vena della spalla {side:+d}.{ri+1}", pts, 0.012)
+    sfiati.append((side * 5.35, -0.825, 0.62 + rows[1] * 1.02))
+
+# Voussoirs of the inner archivolt: radial joints bleeding heat.
+for side in (-1, 1):
+    rng = stable_rng(f"vene dell'archivolto {side:+d}")
+    for gi, i in enumerate(sorted(rng.sample(range(2, 12), 4))):
+        t = i / 13.0
+        xi, zi = arch_point(t, INNER_A, INNER_SPRING, INNER_TOP, side)
+        xo, zo = arch_point(t, OUTER_A, OUTER_SPRING, OUTER_TOP, side)
+        pts = [(xi + (xo - xi) * f, -0.946, zi + (zo - zi) * f)
+               for f in (-0.05, 0.35, 0.70, 1.05)]
+        giunto_caldo(f"Vena dell'archivolto {side:+d}.{gi+1}", pts, 0.011)
+
+# Towers: a vertical split on each face; embers glow in the left collapse.
+for side in (-1, 1):
+    rng = stable_rng(f"vena della torre {side:+d}")
+    x0 = side * 6.75 + side * rng.uniform(-0.30, 0.30)
+    z0 = rng.uniform(1.05, 1.75)
+    pts = [(x0 + rng.uniform(-0.07, 0.07), -1.822, z0 + k * rng.uniform(0.52, 0.72))
+           for k in range(5)]
+    giunto_caldo(f"Vena della torre {side:+d}", pts, 0.012)
+    sfiati.append((side * 6.75, -1.82, z0 + 0.55))
+rng = stable_rng("braci del crollo")
+for k in range(3):
+    add_curve(f"Brace del crollo {k+1}",
+              [(-6.85 + 0.18 * k + rng.uniform(-0.05, 0.05), -1.02 + rng.uniform(-0.10, 0.04), 13.55 + 0.22 * k),
+               (-6.72 + 0.18 * k, -0.96 + rng.uniform(-0.08, 0.06), 13.78 + 0.18 * k),
+               (-6.60 + 0.16 * k + rng.uniform(-0.05, 0.05), -1.04 + rng.uniform(-0.08, 0.06), 14.02 + 0.12 * k)],
+              0.016, hot_vein, resolution=2)
+
+# Plinth at the foot of the doorway: one smoldering seam, two small vents.
+giunto_caldo("Vena dello zoccolo",
+             [(-1.35, -0.868, 0.30), (-0.50, -0.872, 0.42),
+              (0.35, -0.868, 0.36), (1.15, -0.872, 0.52)], 0.012)
+sfiati += [(-0.50, -0.865, 0.40), (1.00, -0.865, 0.46)]
+
+# Lava lake beyond the threshold: black crusts with bright veins, seen in the
+# gap between the half-open leaves; a molten wall closes the depth of the door.
+rng = stable_rng("lago di lava")
+for i, (px, pz, sx) in enumerate([
+        (-1.55, 1.45, 1.05), (0.35, 1.15, 1.25), (1.62, 1.80, 0.95),
+        (-0.85, 2.45, 1.15), (0.95, 3.05, 1.05), (-0.20, 3.65, 0.85)]):
+    add_ico(f"Crosta del lago {i+1}",
+            (px + rng.uniform(-0.08, 0.08), 0.78 + (i % 3) * 0.04, pz),
+            (sx, 0.32, 0.13), lava_mat, subdivisions=2)
+for i, pts in enumerate([
+        [(-2.05, 0.86, 1.20), (-0.90, 0.88, 1.62), (0.40, 0.85, 1.38), (1.70, 0.87, 1.92)],
+        [(-1.60, 0.86, 2.50), (-0.30, 0.88, 2.22), (0.90, 0.86, 2.76), (2.05, 0.87, 3.10)],
+        [(-0.90, 0.87, 3.42), (0.10, 0.86, 3.16), (1.10, 0.88, 3.62)],
+        [(-2.10, 0.87, 1.95), (-1.20, 0.85, 2.62), (-0.35, 0.87, 3.05)]]):
+    add_curve(f"Vena del lago {i+1}", pts, 0.021, hot_vein, resolution=2)
+deep_w = INNER_A - 0.35
+deep_outline = [(-deep_w, 0.62), (deep_w, 0.62), (deep_w, 2.40)]
+deep_outline += arch_points(deep_w, 2.40, 4.60, side=1, steps=18)
+deep_outline += list(reversed(arch_points(deep_w, 2.40, 4.60, side=-1, steps=18)))[1:]
+add_arch_fill("Parete fusa | profondità della porta", deep_outline, 1.13, deep_lava)
+
+# Molten drips crawl down the inner tunnel walls flanking the doorway.
+for side in (-1, 1):
+    rng = stable_rng(f"colate del tunnel {side:+d}")
+    for i in range(2):
+        zx0 = rng.uniform(3.4, 4.3)
+        pts = [(side * 2.485, 0.62 + rng.uniform(-0.06, 0.06),
+                zx0 - k * rng.uniform(0.75, 1.05)) for k in range(4)]
+        add_curve(f"Colata nel tunnel {side:+d}.{i+1}", pts, 0.024, hot_vein, resolution=2)
+
+# A spill of lava crosses the threshold and slides down the ceremonial steps.
+for i, (xx, yy, zc, sx, sy) in enumerate([
+        (0.85, -0.62, 0.38, 0.52, 0.34), (-0.72, -0.98, 0.36, 0.46, 0.30),
+        (0.05, -2.30, 0.72, 0.58, 0.36)]):
+    add_ico(f"Colata oltre la soglia {i+1}", (xx, yy, zc), (sx, sy, 0.085),
+            lava_mat, subdivisions=2)
+add_curve("Rivolo di lava sui gradini",
+          [(0.50, -0.70, 0.40), (0.20, -1.05, 0.42),
+           (-0.15, -1.50, 0.55), (0.05, -2.05, 0.68)], 0.016, hot_vein, resolution=2)
+
+# Small fire outbursts where the veins reach the surface.
+for i, (x, fy, z) in enumerate(sfiati):
+    rng = stable_rng(f"fuoriuscita {i}")
+    w = rng.uniform(0.13, 0.26)
+    h = rng.uniform(0.42, 0.86)
+    flame_shape(f"Fuoriuscita di fuoco {i+1:02d}", x, fy - 0.10, z, w, h,
+                [flame_orange, ember, flame_red][i % 3], lean=rng.uniform(-0.16, 0.16))
+    if i % 3 == 0:
+        flame_shape(f"Nucleo della fuoriuscita {i+1:02d}", x + 0.02, fy - 0.08, z,
+                    w * 0.5, h * 0.55, ember, lean=rng.uniform(-0.08, 0.08))
+
+# Embers drift in front of the vents and rise from the lava lake.
+rng = stable_rng("faville del calore")
+ancore = [(x, fy, z) for x, fy, z in sfiati] + [(0.0, 1.05, 1.6), (-1.3, 1.05, 2.3), (1.4, 1.05, 2.8)]
+for i in range(24):
+    ax, fy, az = ancore[i % len(ancore)]
+    size = rng.uniform(0.014, 0.040)
+    add_ico(f"Favilla del calore {i+1:02d}",
+            (ax + rng.uniform(-0.25, 0.25), fy - rng.uniform(0.15, 0.90),
+             az + rng.uniform(-0.15, 0.45)),
+            (size, size, size * 1.8), rng.choice((ember, flame_orange)), subdivisions=1)
+
+# Heat haze: two thin smoke curls above the shoulder outbursts.
+for k in (2, 3):
+    x, fy, z = sfiati[k]
+    side = -1 if x < 0 else 1
+    add_curve(f"Fumo delle fuoriuscite {k-1}",
+              [(x, fy - 0.05, z + 0.30), (x + side * 0.15, fy - 0.12, z + 0.85),
+               (x - side * 0.08, fy - 0.18, z + 1.45), (x + side * 0.20, fy - 0.26, z + 2.0)],
+              0.026, heat_smoke, resolution=3)
+
+# -----------------------------------------------------------------------------
 # Backdrop, infernal atmosphere, camera and cinematic light
 # -----------------------------------------------------------------------------
 use_collection("04 • Oltretomba | fuoco, lava, catene")
@@ -3015,6 +3236,31 @@ for name, location, energy, color, radius in [
     ACTIVE.objects.link(obj)
     obj.location = location
 
+# Physical lights for the infernal heat fused into the masonry: every vein,
+# vent and lava mirror casts its own warm light, so Cycles spreads real
+# reflections and orange/red indirect bounce across the nearby basalt.
+for name, location, energy, color, radius in [
+    ("Vampa dell'abisso | cuore", (0,1.95,2.7), 1500, (1.0,0.16,0.02), 2.0),
+    ("Lago di lava | specchio sx", (-1.15,0.55,1.7), 420, (1.0,0.10,0.012), 1.3),
+    ("Lago di lava | specchio dx", (1.25,0.55,2.6), 420, (1.0,0.10,0.012), 1.3),
+    ("Vena dei piloni | sx", (-3.62,-1.30,2.85), 300, (1.0,0.12,0.02), 1.0),
+    ("Vena dei piloni | dx", (3.62,-1.30,2.85), 300, (1.0,0.12,0.02), 1.0),
+    ("Vena delle spalle | sx", (-5.38,-1.35,6.1), 260, (1.0,0.10,0.02), 1.0),
+    ("Vena delle spalle | dx", (5.38,-1.35,6.1), 260, (1.0,0.10,0.02), 1.0),
+    ("Giunti ardenti dell'arco", (0,-1.60,7.2), 320, (1.0,0.14,0.02), 1.8),
+    ("Colata oltre la soglia", (0.5,-0.85,0.62), 260, (1.0,0.11,0.02), 0.9),
+    ("Vena della torre | sx", (-6.80,-2.35,2.2), 220, (1.0,0.09,0.02), 1.0),
+    ("Vena della torre | dx", (6.80,-2.35,2.6), 220, (1.0,0.09,0.02), 1.0),
+    ("Braci del crollo | viva", (-6.7,-1.35,13.7), 180, (1.0,0.10,0.02), 0.8),
+]:
+    data = bpy.data.lights.new(name,"POINT")
+    data.energy = energy
+    data.color = color
+    data.shadow_soft_size = radius
+    obj = bpy.data.objects.new(name,data)
+    ACTIVE.objects.link(obj)
+    obj.location = location
+
 # Portrait camera, slightly off-axis for visible jamb depth and open door thickness.
 cam_data = bpy.data.cameras.new("Camera | soglia dei dannati")
 cam = bpy.data.objects.new("Camera | soglia dei dannati",cam_data)
@@ -3054,7 +3300,9 @@ scene.cycles.use_adaptive_sampling = True
 scene.cycles.adaptive_threshold = 0.015
 scene.cycles.adaptive_min_samples = 32
 scene.cycles.max_bounces = 8
-scene.cycles.diffuse_bounces = 3
+# Four diffuse bounces let the orange heat bounce twice more into the stone:
+# warm indirect light fills the recesses instead of dying after one bounce.
+scene.cycles.diffuse_bounces = 4
 scene.cycles.glossy_bounces = 4
 scene.cycles.use_denoising = True
 # Prefiltro accurato: con il micro-dettaglio dei materiali il filtro veloce
@@ -3104,6 +3352,7 @@ nt.links.new(glow.outputs["Image"],comp.inputs["Image"])
 scene["Opera"] = "La Porta dell'Inferno — interpretazione originale da Inferno, Canto III"
 scene["Iscrizione"] = "Lasciate ogni speranza, voi ch'entrate"
 scene["Nota"] = "Modello procedurale dettagliato: geometria, battenti apribili, intagli e shader modificabili."
+scene["Calore infernale"] = "Vene di magma tra i conci, lago di lava nella profondità della porta, fuoriuscite di fuoco: emissione + luci fisiche, riflessi e rimbalzi caldi in Cycles."
 scene["Edizione"] = "II • Intagli, sculture cave e muratura erosa"
 scene["Dettagli modellati"] = "Orbite/naso scavati, 16 denti per cranio, corna rastremate, acanto, trafori, anime in rilievo, meccanica dei cardini, conci scheggiati."
 scene["Seed"] = 73
@@ -3161,6 +3410,13 @@ Corna e dita rastremate, manti con pieghe nel mesh, ali ondulate e spesse.
 Rosone petaliforme, lancette binate, acanto e denti di cane scolpiti.
 Sei collezioni separano architettura, battenti, sculture, inferi, scena e intagli.
 Tutti gli shader sono procedurali. Nessuna texture o libreria da scaricare.
+
+CALORE INFERNALE NELLA STRUTTURA
+Vene incandescenti corrono nei giunti tra i conci di piloni, spalle, archivolto
+e torri; un lago di lava con croste e vene vive occupa la profondità della
+porta, chiuso da una parete fusa; piccole fuoriuscite di fuoco e faville
+seguono le crepe. L'emissione del magma e le luci puntiformi dedicate
+producono riflessi e luce indiretta arancione/rossa sulle superfici vicine.
 
 Rigenera con porta_inferno.py. Usa -- --no-render per il solo modello.
 Il codice del generatore è incluso nel blocco di testo 'porta_inferno.py'.
