@@ -1,6 +1,6 @@
 # La Porta dell'Inferno — Blender · Edizione II
 
-Modello 3D originale ispirato all'**Inferno, Canto III** di Dante: portale gotico in basalto con tre ordini di archi a sesto acuto, torri contrafforte asimmetriche, frontone spezzato, battenti di ferro socchiusi, custodi alati, catene, fuoco e l'iscrizione *«Lasciate ogni speranza, voi ch'entrate»*.
+Modello 3D originale ispirato all'**Inferno, Canto III** di Dante: portale gotico in basalto con tre ordini di archi a sesto acuto, torri contrafforte asimmetriche, frontone spezzato, battenti di ferro socchiusi, custodi alati, catene, fuoco e l'iscrizione *«Lasciate ogni speranza, voi ch'entrate»*. La porta si trova ora al centro di un **ambiente infernale cinematografico**: valle vulcanica nera, rupi fratturate, cenere e fumo volumetrico, braci sospese e lava in lontananza.
 
 **Questa edizione aggiunge dettaglio alla geometria, non soltanto ai materiali.** Intagli, sculture, scheggiature, pieghe e meccanismi restano visibili anche senza texture.
 
@@ -8,10 +8,10 @@ Modello 3D originale ispirato all'**Inferno, Canto III** di Dante: portale gotic
 
 Apri **`porta_dell_inferno.blend`** in Blender **4.5 o successivo**. La scena è già inquadrata; premi **F12** per il render finale.
 
-- **3.430 oggetti**, organizzati in **6 collezioni**; le piccole primitive condividono le mesh per mantenere il progetto leggero.
-- **25 materiali** inclusi, senza texture, font o librerie esterne da scaricare.
+- **3.581 oggetti**, organizzati in **6 collezioni**; le piccole primitive condividono le mesh per mantenere il progetto leggero.
+- **32 materiali** inclusi (tre sono volumi procedurali), senza texture, font o librerie esterne da scaricare.
 - Render finale: **Cycles CPU, 2000 × 2320 px, 128 campioni massimi**, adaptive sampling e denoise accurato.
-- **4 camere**: inquadratura principale e dettagli di battenti, corona/trafori e custode. Seleziona una camera di dettaglio nell'Outliner e premi **Ctrl + Numpad 0**.
+- **4 camere**: inquadratura principale (più arretrata, per mostrare l'ambiente) e dettagli di battenti, corona/trafori e custode. Seleziona una camera di dettaglio nell'Outliner e premi **Ctrl + Numpad 0**.
 - I battenti sono figli degli empty **Cardine del battente sinistro/destro**: ruotali su **Z** per cambiare l'apertura. Anche i nuovi intagli, le anime in rilievo e le serrature seguono il cardine.
 - Il generatore e una breve guida sono inclusi anche nei blocchi di testo del `.blend`.
 
@@ -70,6 +70,19 @@ Il monumento non è più solo *illuminato* dal fuoco: il calore nasce **dentro**
 - **Piccole fuoriuscite di fuoco**: lingue di fiamma e nuclei d'oro nascono dove le vene raggiungono la superficie, con faville sospese e veli di fumo caldo.
 - **Illuminazione fisica**: ogni vena, specchio di lava e fuoriuscita ha una luce puntiforme dedicata (12 nuove luci arancio/rosso) e l'emissione del magma partecipa al GI; con `diffuse_bounces = 4` il bagliore rimbalza realisticamente sul basalto, producendo riflessi caldi sui conci, sul ferro dei battenti e sui gradini.
 
+## Ambiente infernale
+
+L'ambiente è costruito come **cornice della porta**: il monumento resta l'area più luminosa e più contrastata dell'immagine, e tutto il resto guida lo sguardo verso la soglia invece di competere con essa.
+
+- **Terreno vulcanico nero**: heightfield reale (nessun modificatore) piatto attorno al basamento, con dune basse di cenere in primo piano. Ai lati sale in una valle che si chiude verso i bordi dell'inquadratura, come una vignetta fisica. Il materiale `Terreno vulcanico | cenere nera e ossidiana` mescola basalto quasi nero, cenere sulle facce esposte, ossidiana lucida e fratture irregolari.
+- **Rocce fratturate**: massi e schegge generati come inviluppi convessi irregolari, tagliati da piani netti (vere facce di frattura). Le rupi sono blocchi impilati e inclinati: **basse vicino alla porta, più alte ai bordi**, così il loro profilo scende verso la soglia. Sullo sfondo ci sono guglie lontane, in sagoma.
+- **Lava solo in lontananza**: fiumi incandescenti e due laghi, con crosta nera e crepe vive (`Lava lontana | …`), incassati nella piana oltre il monumento. I fiumi convergono verso la base della porta. Sui monti dell'orizzonte non ci sono colate, per non creare un secondo punto luminoso.
+- **Fumo volumetrico**: una foschia di cenere (`Principled Volume`) avvolge la valle ed è più densa al suolo. Colonne di fumo alle spalle del monumento sono illuminate dal basso dalle luci della lava; ai lati del piazzale scorrono banchi radenti, mai davanti alla soglia. Due pennacchi salgono dalla torre spezzata e dai bracieri.
+- **Braci sospese e cenere**: le braci sono bipiramidi allungate lungo la direzione di volo e simulano una scia. Hanno intensità variabile, data da un attributo `calore`, e si addensano attorno alla soglia, più rade altrove. I fiocchi di cenere sono opachi e si diradano nel cono visivo davanti alla porta. Ogni sciame è una sola mesh, quindi resta leggera.
+- **Luce**: il cielo è un velo di fumo arrossato verso l'orizzonte. Luci calde basse sotto le colonne di fumo creano un controluce che stacca la silhouette del monumento. Luna e luci fredde continuano a scolpire la pietra ma non accendono la foschia (`visible_volume_scatter = False`), così il volume si colora solo del calore.
+
+Tutto l'ambiente usa semi stabili (`stable_rng`): non altera l'RNG globale né la geometria del monumento. I volumi rendono il render più lento rispetto all'edizione precedente.
+
 ## Rigenera la scena
 
 Con Blender installato, dalla cartella del progetto:
@@ -110,4 +123,4 @@ blender --background --python tests/validate_scene.py -- \
   --blend porta_dell_inferno.blend --compare-generated .cache/verifica/porta_dell_inferno.blend
 ```
 
-Scena generata e verificata con **Blender 4.5 LTS** (edizione corrente: `bpy` 4.5.9 come modulo Python; il progetto resta compatibile con Blender 4.5+).
+Scena generata e verificata con **Blender 4.5 LTS** (edizione corrente: `bpy` 4.5.14 come modulo Python; il progetto resta compatibile con Blender 4.5+).

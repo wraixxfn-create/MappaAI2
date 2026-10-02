@@ -1636,7 +1636,7 @@ world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.22
 
 # Ground plane and volcanic slabs.
 add_box("Basamento | lastra infernale", (0, -1.2, -0.22), (17.6, 11.5, 0.42), stone_dark, 0.12)
-add_box("Pianoro di basalto", (0, -7.6, -0.36), (42, 26, 0.28), stone_dark, 0.05)
+# Il suolo vulcanico attorno al basamento è generato più avanti (Ambiente infernale).
 # Large irregular flagstones in the foreground, aligned as a broken processional path.
 for row in range(5):
     yy = -3.25 - row * 1.33
@@ -3161,38 +3161,656 @@ for k in (2, 3):
               0.026, heat_smoke, resolution=3)
 
 # -----------------------------------------------------------------------------
-# Backdrop, infernal atmosphere, camera and cinematic light
+# Ambiente infernale cinematografico
+#
+# Regola di composizione: la porta è il punto più luminoso e più contrastato
+# dell'immagine.  Tutto il resto le serve da cornice:
+#   • una valle di terreno vulcanico nero, piatta attorno alla soglia e sempre
+#     più alta e frastagliata verso i bordi dell'inquadratura (vignetta fisica);
+#   • rupi fratturate scure ai lati, più basse vicino al monumento, così le loro
+#     linee scendono verso la porta invece di contenderle la silhouette;
+#   • lava solo in lontananza, oltre il monumento, a bassa intensità: controluce
+#     caldo che stacca il profilo della porta dal fondo;
+#   • fumo volumetrico alle spalle e foschia di cenere, più densa al suolo;
+#   • braci concentrate attorno alla soglia, rade altrove; cenere fine e opaca.
+# Tutto è generato con semi stabili (stable_rng): l'ambiente non sposta l'RNG
+# globale e non cambia la geometria del monumento.
+# -----------------------------------------------------------------------------
+use_collection("05 • Scena | terreno, camera, luci")
+
+
+def _liscio(a, b, x):
+    t = min(max((x - a) / (b - a), 0.0), 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _distanza_polilinea(x, y, punti):
+    best = 1e9
+    for (ax, ay), (bx, by) in zip(punti, punti[1:]):
+        vx, vy = bx - ax, by - ay
+        t = max(0.0, min(1.0, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy)))
+        best = min(best, math.hypot(x - ax - vx * t, y - ay - vy * t))
+    return best
+
+
+# Fiumi di lava lontani: scendono dalle montagne del fondo e convergono verso
+# la base nascosta della porta, come linee guida per lo sguardo.
+FIUMI_DI_LAVA = [
+    ([(-70.0, 165.0), (-46.0, 128.0), (-34.0, 98.0), (-22.0, 74.0), (-11.0, 56.0), (-4.0, 44.0)], 2.6),
+    ([(84.0, 168.0), (56.0, 132.0), (40.0, 104.0), (26.0, 78.0), (13.0, 58.0), (5.0, 45.0)], 3.0),
+    ([(-125.0, 104.0), (-88.0, 92.0), (-58.0, 84.0), (-36.0, 80.0), (-26.0, 77.0)], 2.0),
+    ([(122.0, 112.0), (86.0, 102.0), (56.0, 96.0), (34.0, 93.0), (24.0, 91.0)], 1.8),
+]
+LAGHI_DI_LAVA = [((-31.0, 98.0), 7.5), ((19.0, 90.0), 8.0)]
+
+
+def maschera_lava(x, y):
+    """1 dentro i fiumi e i laghi di lava lontani, 0 sulla roccia (bordo morbido)."""
+    if y < 38.0:
+        return 0.0
+    m = 0.0
+    for punti, largh in FIUMI_DI_LAVA:
+        d = _distanza_polilinea(x, y, punti)
+        largh *= 1.0 + 0.004 * max(0.0, y - 40.0) * 4.0
+        largh *= 1.0 + 0.25 * noise.noise(Vector((x * 0.08, y * 0.08, 5.0)))
+        m = max(m, 1.0 - _liscio(largh * 0.55, largh, d))
+    for (cx, cy), r in LAGHI_DI_LAVA:
+        d = math.hypot(x - cx, (y - cy) * 0.8)
+        r *= 1.0 + 0.18 * noise.noise(Vector((x * 0.12, y * 0.12, 2.0)))
+        m = max(m, 1.0 - _liscio(r * 0.75, r, d))
+    # Niente colate sui monti dell'orizzonte: una cascata luminosa accanto alla
+    # torre ruberebbe lo sguardo alla porta.
+    return m * _liscio(38.0, 46.0, y) * (1.0 - _liscio(104.0, 114.0, y))
+
+
+def quota_terreno(x, y):
+    """Altezza del suolo: piazzale quasi piano, valle che si chiude ai lati."""
+    p = Vector((x, y, 0.0))
+    ondula = noise.fractal(p * 0.035, 1.0, 2.0, 5, noise_basis="PERLIN_NEW")
+    grana = noise.fractal(p * 0.42 + Vector((7.3, 1.1, 0.0)), 0.8, 2.2, 3, noise_basis="PERLIN_NEW")
+    cresta = (noise.ridged_multi_fractal(p * 0.05 + Vector((3.0, 9.0, 0.0)),
+                                          0.9, 2.1, 5, 1.0, 2.2) - 0.2) / 1.66
+    # Piazzale libero attorno alla porta e lungo l'avvicinamento.
+    ex = max(0.0, abs(x) - 9.0)
+    ey = max(0.0, y - 5.5) + max(0.0, -13.0 - y) * 0.30
+    apri = _liscio(0.0, 12.0, math.hypot(ex, ey))
+    # Leggermente sopra il basamento: la lastra resta annegata nella cenere.
+    h = 0.045 + 0.025 * grana
+    h += apri * (0.55 + 0.75 * ondula + 0.22 * grana)
+    # Primo piano: dune di cenere e dorsi di lava raffreddata, bassi sotto la
+    # linea di vista verso la soglia.
+    fronte = _liscio(-15.0, -30.0, y)
+    h += fronte * (0.35 + 0.55 * ondula + 0.55 * cresta)
+    # Versanti: crescono con |x| e con la profondità, mai davanti alla porta.
+    fondo = _liscio(-12.0, 34.0, y)
+    lato = _liscio(13.0, 40.0, abs(x))
+    h += lato * (1.2 + 9.0 * fondo) * (0.45 + 0.75 * cresta)
+    # Piana di lava sul fondo, ribassata, con argini irregolari.
+    piana = _liscio(26.0, 46.0, y) * (1.0 - 0.75 * _liscio(34.0, 80.0, abs(x)))
+    h = h * (1.0 - piana) + piana * (-1.4 + 0.9 * ondula + 0.6 * cresta)
+    # Catena di monti lontani che chiude l'orizzonte.
+    h += _liscio(118.0, 160.0, y) * (10.0 + 26.0 * cresta) * (0.6 + 0.4 * _liscio(10.0, 70.0, abs(x)))
+    # Alveo dei fiumi di lava, leggermente incassato.
+    return h - 0.55 * maschera_lava(x, y)
+
+
+def griglia_terreno(name, xs, ys, materiali, lava_index=None):
+    """Heightfield reale (nessun modificatore): facce di lava con il loro materiale."""
+    mesh = bpy.data.meshes.new(name)
+    bm = bmesh.new()
+    righe = []
+    for y in ys:
+        righe.append([bm.verts.new((x, y, quota_terreno(x, y))) for x in xs])
+    for j in range(len(ys) - 1):
+        for i in range(len(xs) - 1):
+            f = bm.faces.new((righe[j][i], righe[j][i + 1], righe[j + 1][i + 1], righe[j + 1][i]))
+            if lava_index is not None:
+                cx = 0.5 * (xs[i] + xs[i + 1])
+                cy = 0.5 * (ys[j] + ys[j + 1])
+                if maschera_lava(cx, cy) > 0.45:
+                    f.material_index = lava_index
+    bm.to_mesh(mesh)
+    bm.free()
+    for m in materiali:
+        mesh.materials.append(m)
+    mesh.polygons.foreach_set("use_smooth", [True] * len(mesh.polygons))
+    return mesh_object(name, mesh)
+
+
+# --- Materiali dell'ambiente ---------------------------------------------------
+def _nodi(mat):
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    return nt.nodes, nt.links
+
+
+suolo_mat = bpy.data.materials.new("Terreno vulcanico | cenere nera e ossidiana")
+suolo_mat.diffuse_color = (0.018, 0.016, 0.016, 1)
+sn, sl = _nodi(suolo_mat)
+s_out = sn.new("ShaderNodeOutputMaterial"); s_out.location = (900, 0)
+s_bsdf = sn.new("ShaderNodeBsdfPrincipled"); s_bsdf.location = (600, 0)
+s_geo = sn.new("ShaderNodeNewGeometry"); s_geo.location = (-1200, 0)
+s_macro = sn.new("ShaderNodeTexNoise"); s_macro.location = (-900, 300); s_macro.label = "Chiazze di cenere"
+s_macro.inputs["Scale"].default_value = 0.22
+s_macro.inputs["Detail"].default_value = 6.0
+s_macro.inputs["Roughness"].default_value = 0.62
+s_fine = sn.new("ShaderNodeTexNoise"); s_fine.location = (-900, 0); s_fine.label = "Grana di lapillo"
+s_fine.inputs["Scale"].default_value = 7.0
+s_fine.inputs["Detail"].default_value = 8.0
+s_fine.inputs["Roughness"].default_value = 0.70
+s_crepe = sn.new("ShaderNodeTexVoronoi"); s_crepe.location = (-900, -300); s_crepe.label = "Fratture del suolo"
+s_crepe.feature = "DISTANCE_TO_EDGE"
+s_crepe.inputs["Scale"].default_value = 0.65
+for n in (s_macro, s_fine):
+    sl.new(s_geo.outputs["Position"], n.inputs["Vector"])
+s_warp = sn.new("ShaderNodeVectorMath"); s_warp.operation = "MULTIPLY_ADD"; s_warp.location = (-1050, -300)
+s_warp.label = "Fratture irregolari"
+sl.new(s_fine.outputs["Color"], s_warp.inputs[0])
+s_warp.inputs[1].default_value = (0.9, 0.9, 0.9)
+sl.new(s_geo.outputs["Position"], s_warp.inputs[2])
+sl.new(s_warp.outputs["Vector"], s_crepe.inputs["Vector"])
+s_nz = sn.new("ShaderNodeSeparateXYZ"); s_nz.location = (-900, -560)
+sl.new(s_geo.outputs["Normal"], s_nz.inputs["Vector"])
+s_piano = sn.new("ShaderNodeMapRange"); s_piano.location = (-640, -560); s_piano.label = "Facce esposte alla cenere"
+s_piano.inputs["From Min"].default_value = 0.72
+s_piano.inputs["From Max"].default_value = 0.97
+sl.new(s_nz.outputs["Z"], s_piano.inputs["Value"])
+s_chiazza = sn.new("ShaderNodeMapRange"); s_chiazza.location = (-640, 300)
+s_chiazza.inputs["From Min"].default_value = 0.47
+s_chiazza.inputs["From Max"].default_value = 0.66
+sl.new(s_macro.outputs["Fac"], s_chiazza.inputs["Value"])
+s_cenere = sn.new("ShaderNodeMath"); s_cenere.operation = "MULTIPLY"; s_cenere.location = (-380, 200)
+s_cenere.label = "Cenere depositata"
+sl.new(s_chiazza.outputs["Result"], s_cenere.inputs[0])
+sl.new(s_piano.outputs["Result"], s_cenere.inputs[1])
+s_solco = sn.new("ShaderNodeMapRange"); s_solco.location = (-640, -300); s_solco.label = "Solco della frattura"
+s_solco.inputs["From Min"].default_value = 0.0
+s_solco.inputs["From Max"].default_value = 0.012
+sl.new(s_crepe.outputs["Distance"], s_solco.inputs["Value"])
+s_base = sn.new("ShaderNodeValToRGB"); s_base.location = (-380, 0); s_base.label = "Basalto nero"
+s_base.color_ramp.elements[0].color = (0.0045, 0.0042, 0.0044, 1)
+s_base.color_ramp.elements[1].color = (0.030, 0.026, 0.025, 1)
+sl.new(s_fine.outputs["Fac"], s_base.inputs["Fac"])
+s_mix_cenere = sn.new("ShaderNodeMix"); s_mix_cenere.data_type = "RGBA"; s_mix_cenere.location = (-120, 100)
+sl.new(s_cenere.outputs["Value"], s_mix_cenere.inputs["Factor"])
+sl.new(s_base.outputs["Color"], s_mix_cenere.inputs["A"])
+s_mix_cenere.inputs["B"].default_value = (0.085, 0.077, 0.072, 1)
+s_mix_solco = sn.new("ShaderNodeMix"); s_mix_solco.data_type = "RGBA"; s_mix_solco.location = (140, 60)
+sl.new(s_solco.outputs["Result"], s_mix_solco.inputs["Factor"])
+s_mix_solco.inputs["A"].default_value = (0.0030, 0.0026, 0.0026, 1)
+sl.new(s_mix_cenere.outputs["Result"], s_mix_solco.inputs["B"])
+sl.new(s_mix_solco.outputs["Result"], s_bsdf.inputs["Base Color"])
+# Ossidiana lucida dove manca la cenere: piccoli riflessi vetrosi del fuoco.
+s_ruv = sn.new("ShaderNodeMapRange"); s_ruv.location = (140, -200); s_ruv.label = "Ossidiana ↔ cenere"
+s_ruv.inputs["To Min"].default_value = 0.42
+s_ruv.inputs["To Max"].default_value = 0.97
+sl.new(s_cenere.outputs["Value"], s_ruv.inputs["Value"])
+sl.new(s_ruv.outputs["Result"], s_bsdf.inputs["Roughness"])
+s_alt = sn.new("ShaderNodeMath"); s_alt.operation = "MULTIPLY"; s_alt.location = (-120, -300)
+sl.new(s_fine.outputs["Fac"], s_alt.inputs[0])
+sl.new(s_solco.outputs["Result"], s_alt.inputs[1])
+# Dorsi di lava raffreddata a scala di metri, sommati alla grana fine.
+s_dorsi = sn.new("ShaderNodeTexNoise"); s_dorsi.location = (-900, -800); s_dorsi.label = "Dorsi di lava raffreddata"
+s_dorsi.inputs["Scale"].default_value = 0.9
+s_dorsi.inputs["Detail"].default_value = 4.0
+s_dorsi.inputs["Distortion"].default_value = 1.4
+sl.new(s_geo.outputs["Position"], s_dorsi.inputs["Vector"])
+s_somma = sn.new("ShaderNodeMath"); s_somma.operation = "MULTIPLY_ADD"; s_somma.location = (120, -420)
+sl.new(s_dorsi.outputs["Fac"], s_somma.inputs[0])
+s_somma.inputs[1].default_value = 2.5
+sl.new(s_alt.outputs["Value"], s_somma.inputs[2])
+s_alt = s_somma
+s_bump = sn.new("ShaderNodeBump"); s_bump.location = (380, -300)
+s_bump.inputs["Strength"].default_value = 0.55
+s_bump.inputs["Distance"].default_value = 0.08
+sl.new(s_alt.outputs["Value"], s_bump.inputs["Height"])
+sl.new(s_bump.outputs["Normal"], s_bsdf.inputs["Normal"])
+sl.new(s_bsdf.outputs["BSDF"], s_out.inputs["Surface"])
+
+lava_lontana = bpy.data.materials.new("Lava lontana | fiumi incandescenti sotto la crosta")
+lava_lontana.diffuse_color = (0.8, 0.12, 0.01, 1)
+ln_, ll_ = _nodi(lava_lontana)
+l_out = ln_.new("ShaderNodeOutputMaterial"); l_out.location = (900, 0)
+l_mix = ln_.new("ShaderNodeMixShader"); l_mix.location = (680, 0)
+l_crosta = ln_.new("ShaderNodeBsdfPrincipled"); l_crosta.location = (380, 200)
+l_crosta.inputs["Base Color"].default_value = (0.006, 0.0045, 0.004, 1)
+l_crosta.inputs["Roughness"].default_value = 0.8
+l_em = ln_.new("ShaderNodeEmission"); l_em.location = (380, -120)
+l_geo = ln_.new("ShaderNodeNewGeometry"); l_geo.location = (-1100, 0)
+l_flusso = ln_.new("ShaderNodeTexNoise"); l_flusso.location = (-800, 200); l_flusso.label = "Corrente fusa"
+l_flusso.inputs["Scale"].default_value = 0.16
+l_flusso.inputs["Detail"].default_value = 6.0
+l_flusso.inputs["Distortion"].default_value = 1.6
+l_placche = ln_.new("ShaderNodeTexVoronoi"); l_placche.location = (-800, -150); l_placche.label = "Placche di crosta"
+l_placche.feature = "DISTANCE_TO_EDGE"
+l_placche.inputs["Scale"].default_value = 0.42
+for n in (l_flusso, l_placche):
+    ll_.new(l_geo.outputs["Position"], n.inputs["Vector"])
+l_crepa = ln_.new("ShaderNodeMapRange"); l_crepa.location = (-520, -150)
+l_crepa.inputs["From Min"].default_value = 0.16
+l_crepa.inputs["From Max"].default_value = 0.0
+ll_.new(l_placche.outputs["Distance"], l_crepa.inputs["Value"])
+l_vivo = ln_.new("ShaderNodeMapRange"); l_vivo.location = (-520, 200); l_vivo.label = "Lava scoperta"
+l_vivo.inputs["From Min"].default_value = 0.50
+l_vivo.inputs["From Max"].default_value = 0.68
+ll_.new(l_flusso.outputs["Fac"], l_vivo.inputs["Value"])
+l_calore = ln_.new("ShaderNodeMath"); l_calore.operation = "MAXIMUM"; l_calore.location = (-260, 40)
+ll_.new(l_crepa.outputs["Result"], l_calore.inputs[0])
+ll_.new(l_vivo.outputs["Result"], l_calore.inputs[1])
+l_rampa = ln_.new("ShaderNodeValToRGB"); l_rampa.location = (40, -120)
+l_rampa.color_ramp.elements[0].color = (0.30, 0.012, 0.004, 1)
+l_rampa.color_ramp.elements[1].color = (1.0, 0.36, 0.045, 1)
+ll_.new(l_calore.outputs["Value"], l_rampa.inputs["Fac"])
+ll_.new(l_rampa.outputs["Color"], l_em.inputs["Color"])
+l_forza = ln_.new("ShaderNodeMapRange"); l_forza.location = (40, -380)
+l_forza.inputs["To Min"].default_value = 0.6
+l_forza.inputs["To Max"].default_value = 9.0
+ll_.new(l_calore.outputs["Value"], l_forza.inputs["Value"])
+ll_.new(l_forza.outputs["Result"], l_em.inputs["Strength"])
+l_cop = ln_.new("ShaderNodeMath"); l_cop.operation = "SUBTRACT"; l_cop.location = (380, 420)
+l_cop.inputs[0].default_value = 1.0
+ll_.new(l_calore.outputs["Value"], l_cop.inputs[1])
+l_copm = ln_.new("ShaderNodeMath"); l_copm.operation = "MULTIPLY"; l_copm.location = (540, 420)
+l_copm.inputs[1].default_value = 0.85
+ll_.new(l_cop.outputs["Value"], l_copm.inputs[0])
+ll_.new(l_copm.outputs["Value"], l_mix.inputs["Fac"])
+ll_.new(l_em.outputs["Emission"], l_mix.inputs[1])
+ll_.new(l_crosta.outputs["BSDF"], l_mix.inputs[2])
+ll_.new(l_mix.outputs["Shader"], l_out.inputs["Surface"])
+
+roccia_nera = materiale_eroso(
+    "Roccia vulcanica | basalto nero fratturato",
+    (0.020, 0.018, 0.018),
+    dict(PIETRA_COMUNE,
+         col_profondo=(0.0030, 0.0028, 0.0030),
+         col_base=(0.020, 0.018, 0.018),
+         col_chiaro=(0.052, 0.047, 0.045),
+         col_fresco=(0.040, 0.036, 0.034),
+         col_crepa=(0.0008, 0.0007, 0.0008),
+         col_cenere=(0.092, 0.084, 0.079),
+         col_fuliggine=(0.0030, 0.0026, 0.0026),
+         col_bruciato=(0.0024, 0.0020, 0.0020),
+         col_scottatura=(0.040, 0.014, 0.008),
+         macro=(0.30, 7.0), meso=(1.6, 9.0), micro=(8.0, 3.0),
+         medio=(1.10, 7.0),
+         crepa=(2.4, 0.90, 0.07), craquelure=(0.30, 0.50, 0.012),
+         vaioli=(0.10, 0.60), schegge=(0.22, 0.85),
+         bruciatura=(0.20, 0.55), cenere=0.42, fuliggine=0.50, usura=0.35,
+         rilievo=(1.10, 0.09), microrilievo=(0.24, 0.010),
+         ruvido=0.86, metallico=0.0, vetrificato=0.55))
+
+
+# --- Terreno -----------------------------------------------------------------
+def _passi(a, b, passo):
+    n = int(round((b - a) / passo))
+    return [a + (b - a) * i / n for i in range(n + 1)]
+
+
+griglia_terreno("Terreno vulcanico | valle di cenere nera",
+                _passi(-46.0, 46.0, 0.5), _passi(-50.0, 52.0, 0.5), [suolo_mat])
+griglia_terreno("Terreno vulcanico | piana dei fiumi di lava",
+                _passi(-150.0, 150.0, 1.25), _passi(48.0, 190.0, 1.25),
+                [suolo_mat, lava_lontana], lava_index=1)
+
+
+# --- Rocce fratturate --------------------------------------------------------
+def roccia_fratturata(name, loc, size, rng, material=None, tagli=2, inclina=0.18, affonda=0.30):
+    """Masso a facce di frattura: inviluppo convesso irregolare tagliato da piani netti."""
+    bm = bmesh.new()
+    seme = Vector((rng.uniform(-50, 50), rng.uniform(-50, 50), rng.uniform(-50, 50)))
+    for _ in range(rng.randint(30, 48)):
+        u = rng.uniform(-1.0, 1.0)
+        th = rng.uniform(0.0, 2.0 * math.pi)
+        r = math.sqrt(1.0 - u * u)
+        d = Vector((r * math.cos(th), r * math.sin(th), u))
+        k = 1.0 + 0.22 * noise.noise(d * 1.6 + seme) + rng.uniform(-0.06, 0.06)
+        bm.verts.new((d.x * size[0] * k, d.y * size[1] * k, d.z * size[2] * k))
+    bmesh.ops.convex_hull(bm, input=bm.verts[:])
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
+    raggio = min(size)
+    for _ in range(tagli):
+        th = rng.uniform(0.0, 2.0 * math.pi)
+        nz = rng.uniform(-0.15, 0.85)
+        no = Vector((math.cos(th), math.sin(th), nz)).normalized()
+        co = no * raggio * rng.uniform(0.45, 0.80)
+        bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:],
+                               plane_co=co, plane_no=no, clear_outer=True)
+        bmesh.ops.holes_fill(bm, edges=bm.edges[:], sides=0)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.materials.append(material or roccia_nera)
+    x, y = loc[0], loc[1]
+    z = loc[2] if len(loc) > 2 else quota_terreno(x, y) - size[2] * affonda
+    obj = mesh_object(name, mesh, (x, y, z))
+    obj.rotation_euler = (rng.uniform(-inclina, inclina), rng.uniform(-inclina, inclina),
+                          rng.uniform(0.0, 2.0 * math.pi))
+    return obj
+
+
+def rupe(name, x, y, altezza, base, rng, pezzi=4):
+    """Rupe frastagliata: blocchi impilati e inclinati, come basalto spaccato dal calore."""
+    z = quota_terreno(x, y) - 0.6
+    lean = rng.uniform(-0.10, 0.10)
+    for k in range(pezzi):
+        f = 1.0 - k / (pezzi + 0.6)
+        h = altezza / pezzi * rng.uniform(0.9, 1.35)
+        cx = x + lean * z + rng.uniform(-0.25, 0.25) * base
+        cy = y + rng.uniform(-0.25, 0.25) * base
+        roccia_fratturata(f"{name} | blocco {k + 1}", (cx, cy, z + h * 0.45),
+                          (base * f * rng.uniform(0.75, 1.0), base * f * rng.uniform(0.55, 0.85), h * 0.62),
+                          rng, tagli=3, inclina=0.12)
+        z += h * 0.78
+
+
+rng = stable_rng("rocce del piazzale")
+# Massi bassi sui fianchi del piazzale: rompono il piano senza coprire la porta.
+for side in (-1, 1):
+    for i in range(7):
+        x = side * rng.uniform(10.5, 21.0)
+        y = rng.uniform(-20.0, 3.0)
+        s = rng.uniform(0.45, 1.5) * (1.0 + 0.04 * abs(x))
+        roccia_fratturata(f"Masso fratturato {side:+d}.{i + 1}", (x, y),
+                          (s * rng.uniform(1.0, 1.6), s * rng.uniform(0.8, 1.3), s * rng.uniform(0.55, 0.95)),
+                          rng, tagli=rng.randint(1, 3))
+    # Schegge minute che accompagnano i massi.
+    for i in range(16):
+        x = side * rng.uniform(8.8, 18.0)
+        y = rng.uniform(-22.0, 2.0)
+        s = rng.uniform(0.10, 0.32)
+        roccia_fratturata(f"Scheggia di basalto {side:+d}.{i + 1}", (x, y),
+                          (s * 1.4, s, s * 0.6), rng, tagli=1, inclina=0.5, affonda=0.2)
+
+# Primo piano: due gruppi di rocce scure ai bordi dell'inquadratura danno
+# profondità e restano fuori fuoco, lontani dall'asse della porta.
+rng = stable_rng("rocce del primo piano")
+for i, (x, y, s) in enumerate([(-2.6, -23.0, 1.1), (-1.2, -25.5, 0.55), (-3.4, -20.5, 0.4),
+                               (11.6, -21.5, 1.3), (10.0, -24.0, 0.6), (12.8, -18.5, 0.45)]):
+    roccia_fratturata(f"Roccia del primo piano {i + 1}", (x, y),
+                      (s * 1.5, s * 1.1, s * 0.8), rng, tagli=2, inclina=0.25)
+
+# Rupi che incorniciano la valle: basse vicino alla porta, alte ai bordi.
+rng = stable_rng("rupi della valle")
+for side in (-1, 1):
+    for i, (dx, y, h, b) in enumerate([
+            (15.5, 9.0, 5.5, 2.6), (19.0, 16.0, 8.5, 3.2), (23.5, 4.0, 7.0, 3.0),
+            (26.0, 22.0, 12.5, 4.0), (31.0, 12.0, 11.0, 3.6), (36.0, 28.0, 16.0, 4.8),
+            (28.0, -8.0, 6.5, 3.0), (34.0, 0.0, 10.0, 3.8)]):
+        if side > 0 and dx > 18.0:
+            # La camera guarda da destra: queste rupi resterebbero fuori campo.
+            dx, y = 10.5 + (dx - 18.0) * 0.22, y + 12.0
+        rupe(f"Rupe fratturata {side:+d}.{i + 1}", side * (dx + rng.uniform(-1.0, 1.0)),
+             y + rng.uniform(-1.5, 1.5), h * rng.uniform(0.85, 1.1), b, rng,
+             pezzi=3 if h < 8 else 4)
+
+# Guglie lontane, sagome contro il fumo illuminato dalla lava.
+rng = stable_rng("guglie lontane")
+for i, (x, y, h, b) in enumerate([
+        (-48.0, 70.0, 22.0, 6.0), (-62.0, 92.0, 30.0, 8.0), (-38.0, 112.0, 18.0, 6.0),
+        (52.0, 74.0, 24.0, 6.5), (70.0, 98.0, 34.0, 8.5), (30.0, 118.0, 20.0, 6.0),
+        (-84.0, 120.0, 38.0, 10.0), (92.0, 128.0, 40.0, 10.0)]):
+    rupe(f"Guglia lontana {i + 1}", x, y, h, b, rng, pezzi=4)
+
+
+# -----------------------------------------------------------------------------
+# Atmosfera: foschia di cenere, colonne di fumo volumetrico, braci e cenere
 # -----------------------------------------------------------------------------
 use_collection("04 • Oltretomba | fuoco, lava, catene")
-# Low silhouette of broken basalt teeth behind the monument.
-for side in (-1,1):
-    for i in range(5):
-        x = side*(8.6 + i*1.2)
-        h = random.uniform(5.0,11.0)
-        add_cone(f"Dente di basalto lontano {side:+d}.{i+1}",
-                 (x,2.4, h*0.5-0.15), random.uniform(0.65,1.15), 0.0, h,
-                 stone_dark, vertices=5)
-# A dim blood-red atmospheric plane behind the far silhouette.
-backdrop_mat = emission_material("Orizzonte | cenere rossa", (0.028,0.004,0.012), 0.45)
-add_box("Fondale dell'abisso", (0,5.2,8.5), (66,0.18,36), backdrop_mat, 0.0)
 
-# Smoke-like curls rising from the broken lintel and the burning threshold.
-smoke_mat = principled_material("Fumo | cenere fredda", (0.11,0.075,0.10,1), 0.0, 0.92,
-                                3.0,0.12,0.07,(0.025,0.018,0.04,1),(0.24,0.15,0.16,1))
-# Smoke escapes the collapsed crown of the left tower and the burning threshold.
-for i in range(3):
-    x = -6.55 + i*0.42
-    z0 = 13.6 + i*0.25
-    pts = [(x,-0.75,z0),(x-0.25,-0.60,z0+0.55),(x+0.10,-0.45,z0+1.05),
-           (x-0.35,-0.30,z0+1.55),(x-0.60,-0.15,z0+1.95)]
-    add_curve(f"Vapore d'ombra | torre spezzata {i+1}", pts,
-              0.03 + i*0.008, smoke_mat, resolution=3)
-for side in (-1,1):
-    x = side*2.95
-    z0 = 5.4
-    pts = [(x,-1.85,z0),(x+side*0.22,-1.75,z0+0.5),(x-side*0.10,-1.65,z0+0.95),
-           (x+side*0.30,-1.55,z0+1.4),(x+side*0.55,-1.45,z0+1.7)]
-    add_curve(f"Vapore d'ombra | soglia {side:+d}", pts, 0.03, smoke_mat, resolution=3)
+
+def materiale_volume(nome, colore, densita, scala, soglia, anisotropia=0.3,
+                     emissione=None, quota=None, bordo=True):
+    """Principled Volume procedurale: rumore distorto, sfumato verso i bordi."""
+    mat = bpy.data.materials.new(nome)
+    mat.diffuse_color = (*colore, 1)
+    nodes, links = _nodi(mat)
+    out = nodes.new("ShaderNodeOutputMaterial"); out.location = (900, 0)
+    vol = nodes.new("ShaderNodeVolumePrincipled"); vol.location = (600, 0)
+    vol.inputs["Color"].default_value = (*colore, 1)
+    vol.inputs["Anisotropy"].default_value = anisotropia
+    if emissione:
+        vol.inputs["Emission Color"].default_value = (*emissione[0], 1)
+    tc = nodes.new("ShaderNodeTexCoord"); tc.location = (-1200, 0)
+    nz = nodes.new("ShaderNodeTexNoise"); nz.location = (-900, 120); nz.label = "Volute"
+    nz.inputs["Scale"].default_value = scala
+    nz.inputs["Detail"].default_value = 5.0
+    nz.inputs["Roughness"].default_value = 0.62
+    nz.inputs["Distortion"].default_value = 0.9
+    links.new(tc.outputs["Object"], nz.inputs["Vector"])
+    mr = nodes.new("ShaderNodeMapRange"); mr.location = (-640, 120); mr.label = "Soglia delle volute"
+    mr.inputs["From Min"].default_value = soglia
+    mr.inputs["From Max"].default_value = soglia + 0.40
+    links.new(nz.outputs["Fac"], mr.inputs["Value"])
+    dens = mr.outputs["Result"]
+    if bordo:
+        # Sfuma verso il guscio dell'ellissoide: niente bordi netti.
+        cen = nodes.new("ShaderNodeVectorMath"); cen.operation = "LENGTH"; cen.location = (-900, -200)
+        links.new(tc.outputs["Object"], cen.inputs[0])
+        sf = nodes.new("ShaderNodeMapRange"); sf.location = (-640, -200); sf.label = "Sfumatura del bordo"
+        sf.inputs["From Min"].default_value = 1.0
+        sf.inputs["From Max"].default_value = 0.35
+        links.new(cen.outputs["Value"], sf.inputs["Value"])
+        mm = nodes.new("ShaderNodeMath"); mm.operation = "MULTIPLY"; mm.location = (-380, 0)
+        links.new(dens, mm.inputs[0]); links.new(sf.outputs["Result"], mm.inputs[1])
+        dens = mm.outputs["Value"]
+    if quota:
+        # Densità che decresce con l'altezza (coordinate oggetto = mondo).
+        sep = nodes.new("ShaderNodeSeparateXYZ"); sep.location = (-900, -420)
+        links.new(tc.outputs["Object"], sep.inputs["Vector"])
+        dec = nodes.new("ShaderNodeMapRange"); dec.location = (-640, -420); dec.label = "Densa al suolo"
+        dec.interpolation_type = "SMOOTHSTEP"
+        dec.inputs["From Min"].default_value = quota[1]
+        dec.inputs["From Max"].default_value = quota[0]
+        dec.inputs["To Min"].default_value = quota[2]
+        links.new(sep.outputs["Z"], dec.inputs["Value"])
+        mq = nodes.new("ShaderNodeMath"); mq.operation = "MULTIPLY"; mq.location = (-200, -200)
+        links.new(dens, mq.inputs[0]); links.new(dec.outputs["Result"], mq.inputs[1])
+        dens = mq.outputs["Value"]
+    scala_d = nodes.new("ShaderNodeMath"); scala_d.operation = "MULTIPLY"; scala_d.location = (100, 0)
+    scala_d.label = "Densità"
+    scala_d.inputs[1].default_value = densita
+    links.new(dens, scala_d.inputs[0])
+    links.new(scala_d.outputs["Value"], vol.inputs["Density"])
+    if emissione:
+        em = nodes.new("ShaderNodeMath"); em.operation = "MULTIPLY"; em.location = (350, -250)
+        em.inputs[1].default_value = emissione[1]
+        links.new(dens, em.inputs[0])
+        links.new(em.outputs["Value"], vol.inputs["Emission Strength"])
+    links.new(vol.outputs["Volume"], out.inputs["Volume"])
+    return mat
+
+
+def volume_ellissoide(name, centro, semiassi, material, rot_z=0.0):
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=3, radius=1.0)
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.materials.append(material)
+    obj = mesh_object(name, mesh, centro)
+    obj.scale = semiassi
+    obj.rotation_euler[2] = rot_z
+    return obj
+
+
+# Foschia di cenere che avvolge tutta la valle, più spessa al suolo. È questa a
+# trasformare il bagliore della soglia in un alone e la lava in controluce.
+foschia_mat = materiale_volume("Foschia di cenere | atmosfera della valle",
+                               (0.62, 0.50, 0.45), 0.0042, 0.035, 0.18, anisotropia=0.45,
+                               quota=(0.0, 16.0, 0.05), bordo=False)
+foschia = add_box("Atmosfera | foschia di cenere", (0.0, 70.0, 20.0), (300.0, 250.0, 46.0),
+                  foschia_mat, 0.0)
+
+# Colonne di fumo alle spalle del monumento, illuminate dal basso dalla lava.
+fumo_mat = materiale_volume("Fumo volumetrico | colonne sopra la lava",
+                            (0.24, 0.19, 0.18), 0.36, 2.4, 0.42, anisotropia=0.25,
+                            emissione=((1.0, 0.16, 0.03), 0.020))
+rng = stable_rng("colonne di fumo")
+for i, (x, y, z, sx, sy, sz) in enumerate([
+        (-14.0, 34.0, 13.0, 11.0, 8.0, 15.0), (12.0, 40.0, 16.0, 12.0, 9.0, 18.0),
+        (-2.0, 58.0, 24.0, 16.0, 11.0, 22.0), (-34.0, 78.0, 18.0, 13.0, 10.0, 20.0),
+        (32.0, 86.0, 21.0, 14.0, 10.0, 22.0), (-12.0, 96.0, 32.0, 20.0, 14.0, 24.0)]):
+    volume_ellissoide(f"Colonna di fumo {i + 1}", (x, y, z), (sx, sy, sz), fumo_mat,
+                      rot_z=rng.uniform(-0.4, 0.4))
+
+# Banchi di fumo radente ai lati del piazzale (mai davanti alla soglia).
+fumo_basso = materiale_volume("Fumo radente | nebbia di zolfo e cenere",
+                              (0.42, 0.34, 0.30), 0.20, 3.0, 0.44, anisotropia=0.35)
+for side in (-1, 1):
+    volume_ellissoide(f"Fumo radente {side:+d}", (side * 19.0, -2.0, 0.6), (9.0, 13.0, 2.6), fumo_basso)
+    volume_ellissoide(f"Fumo radente lontano {side:+d}", (side * 16.0, 18.0, 1.2), (12.0, 7.0, 3.5), fumo_basso)
+
+# Pennacchi sopra la torre spezzata e ai lati della soglia (sostituiscono i tubi).
+fumo_torre = materiale_volume("Fumo volumetrico | pennacchi del monumento",
+                              (0.26, 0.21, 0.20), 0.9, 1.6, 0.40, anisotropia=0.2,
+                              emissione=((1.0, 0.13, 0.02), 0.05))
+volume_ellissoide("Pennacchio della torre spezzata", (-7.1, -0.4, 16.4), (1.6, 1.3, 3.2), fumo_torre, 0.3)
+for side in (-1, 1):
+    volume_ellissoide(f"Pennacchio del braciere {side:+d}", (side * 3.05, -1.6, 7.9),
+                      (0.65, 0.55, 1.9), fumo_torre)
+
+
+def nube_di_frammenti(name, n, material, rng, campiona, forma):
+    """Una sola mesh con migliaia di frammenti minuti: leggera da salvare e renderizzare."""
+    bm = bmesh.new()
+    calore = bm.verts.layers.float.new("calore")
+    for _ in range(n):
+        centro, dimensione, direzione, valore = campiona()
+        verts = forma(bm, centro, dimensione, direzione, rng)
+        for v in verts:
+            v[calore] = valore
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.materials.append(material)
+    return mesh_object(name, mesh)
+
+
+def _scintilla(bm, c, s, d, rng):
+    """Bipiramide allungata lungo la direzione di volo: brace con scia."""
+    d = d.normalized()
+    a = d.orthogonal().normalized()
+    b = d.cross(a)
+    lung = s * rng.uniform(2.2, 4.5)
+    vs = [bm.verts.new(c + d * lung), bm.verts.new(c - d * lung * 0.6)]
+    anello = [bm.verts.new(c + (a * math.cos(t) + b * math.sin(t)) * s)
+              for t in (0.0, 2.094, 4.189)]
+    for i in range(3):
+        bm.faces.new((vs[0], anello[i], anello[(i + 1) % 3]))
+        bm.faces.new((vs[1], anello[(i + 1) % 3], anello[i]))
+    return vs + anello
+
+
+def _fiocco(bm, c, s, d, rng):
+    """Fiocco di cenere: scaglia triangolare irregolare, orientata a caso."""
+    a = Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-1, 1))).normalized()
+    b = a.orthogonal().normalized()
+    vs = [bm.verts.new(c + (a * math.cos(t) + b * math.sin(t)) * s * rng.uniform(0.6, 1.3))
+          for t in (0.0, 2.2, 4.1)]
+    bm.faces.new(vs)
+    return vs
+
+
+brace_mat = bpy.data.materials.new("Braci sospese | scintille con scia")
+brace_mat.diffuse_color = (1.0, 0.25, 0.03, 1)
+bn, bl = _nodi(brace_mat)
+b_out = bn.new("ShaderNodeOutputMaterial"); b_out.location = (700, 0)
+b_em = bn.new("ShaderNodeEmission"); b_em.location = (450, 0)
+b_at = bn.new("ShaderNodeAttribute"); b_at.location = (-300, 0)
+b_at.attribute_name = "calore"
+b_ramp = bn.new("ShaderNodeValToRGB"); b_ramp.location = (0, 100)
+b_ramp.color_ramp.elements[0].color = (0.65, 0.025, 0.004, 1)
+b_mid = b_ramp.color_ramp.elements.new(0.55); b_mid.color = (1.0, 0.16, 0.012, 1)
+b_ramp.color_ramp.elements[2].color = (1.0, 0.58, 0.14, 1)
+bl.new(b_at.outputs["Fac"], b_ramp.inputs["Fac"])
+bl.new(b_ramp.outputs["Color"], b_em.inputs["Color"])
+b_str = bn.new("ShaderNodeMapRange"); b_str.location = (0, -200)
+b_str.inputs["To Min"].default_value = 1.5
+b_str.inputs["To Max"].default_value = 11.0
+bl.new(b_at.outputs["Fac"], b_str.inputs["Value"])
+bl.new(b_str.outputs["Result"], b_em.inputs["Strength"])
+bl.new(b_em.outputs["Emission"], b_out.inputs["Surface"])
+
+cenere_mat = principled_material("Cenere sospesa | fiocchi opachi", (0.16, 0.145, 0.14, 1), 0.0, 1.0)
+
+rng = stable_rng("braci sospese")
+
+
+def _campiona_brace():
+    r = rng.random()
+    vento = Vector((-0.35, 0.08, 1.0))
+    if r < 0.38:
+        # Il nugolo principale nasce dalla soglia e sale lungo la facciata.
+        c = Vector((rng.gauss(0.0, 2.4), rng.uniform(-7.0, -1.3), 0.25 + rng.expovariate(1 / 3.2)))
+        s = rng.uniform(0.010, 0.022)
+        v = rng.uniform(0.35, 1.0) * (1.0 - min(c.z / 16.0, 0.6))
+    elif r < 0.66:
+        # Faville rade nel resto della valle.
+        c = Vector((rng.uniform(-16.0, 18.0), rng.uniform(-24.0, 8.0), rng.uniform(0.3, 18.0)))
+        s = rng.uniform(0.009, 0.018)
+        v = rng.uniform(0.15, 0.7)
+    elif r < 0.97:
+        # Scintille che salgono dalla lava lontana, oltre il monumento.
+        c = Vector((rng.uniform(-40.0, 40.0), rng.uniform(26.0, 80.0), rng.uniform(0.0, 16.0)))
+        s = rng.uniform(0.025, 0.05)
+        v = rng.uniform(0.2, 0.8)
+    else:
+        # Poche braci vicinissime all'obiettivo, sfocate dalla profondità di campo.
+        c = Vector((rng.uniform(-2.0, 11.0), rng.uniform(-40.0, -30.0), rng.uniform(2.0, 12.0)))
+        s = rng.uniform(0.008, 0.016)
+        v = rng.uniform(0.3, 0.8)
+    d = vento + Vector((rng.uniform(-0.5, 0.5), rng.uniform(-0.3, 0.3), rng.uniform(-0.2, 0.4)))
+    return c, s, d, v
+
+
+nube_di_frammenti("Braci sospese | nugolo della soglia", 650, brace_mat, rng, _campiona_brace, _scintilla)
+
+rng = stable_rng("cenere sospesa")
+
+
+def _campiona_cenere():
+    while True:
+        c = Vector((rng.uniform(-20.0, 24.0), rng.uniform(-38.0, 14.0), rng.uniform(0.0, 22.0)))
+        # La cenere si dirada davanti alla porta: lo sguardo resta libero.
+        if abs(c.x) < 4.5 and c.z < 11.0 and c.y > -16.0 and rng.random() < 0.75:
+            continue
+        break
+    s = rng.uniform(0.018, 0.045) * (1.0 + max(0.0, -c.y - 20.0) * 0.03)
+    return c, s, None, 0.0
+
+
+nube_di_frammenti("Cenere sospesa | fiocchi nell'aria", 2600, cenere_mat, rng, _campiona_cenere, _fiocco)
+
+# Fondale lontano: il cielo è un velo di fumo arrossato dal basso.
+world.node_tree.nodes.clear()
+w_out = world.node_tree.nodes.new("ShaderNodeOutputWorld"); w_out.location = (600, 0)
+w_bg = world.node_tree.nodes.new("ShaderNodeBackground"); w_bg.location = (380, 0)
+w_bg.inputs["Strength"].default_value = 1.0
+w_tc = world.node_tree.nodes.new("ShaderNodeTexCoord"); w_tc.location = (-600, 0)
+w_sep = world.node_tree.nodes.new("ShaderNodeSeparateXYZ"); w_sep.location = (-400, 0)
+w_ramp = world.node_tree.nodes.new("ShaderNodeValToRGB"); w_ramp.location = (60, 0)
+w_ramp.label = "Orizzonte arrossato → cielo di fumo"
+w_ramp.color_ramp.elements[0].position = 0.50
+w_ramp.color_ramp.elements[0].color = (0.050, 0.010, 0.004, 1)
+w_mid = w_ramp.color_ramp.elements.new(0.56); w_mid.color = (0.016, 0.0045, 0.003, 1)
+w_ramp.color_ramp.elements[2].position = 0.80
+w_ramp.color_ramp.elements[2].color = (0.0025, 0.0018, 0.0020, 1)
+w_mr = world.node_tree.nodes.new("ShaderNodeMapRange"); w_mr.location = (-200, 0)
+w_mr.inputs["From Min"].default_value = -1.0
+w_mr.inputs["From Max"].default_value = 1.0
+wl = world.node_tree.links
+wl.new(w_tc.outputs["Generated"], w_sep.inputs["Vector"])
+wl.new(w_sep.outputs["Z"], w_mr.inputs["Value"])
+wl.new(w_mr.outputs["Result"], w_ramp.inputs["Fac"])
+wl.new(w_ramp.outputs["Color"], w_bg.inputs["Color"])
+wl.new(w_bg.outputs["Background"], w_out.inputs["Surface"])
+world.name = "Cielo di fumo | orizzonte arrossato dalla lava"
+
+# -----------------------------------------------------------------------------
+# Camera and cinematic light
+# -----------------------------------------------------------------------------
 
 use_collection("05 • Scena | terreno, camera, luci")
 
@@ -3261,17 +3879,50 @@ for name, location, energy, color, radius in [
     ACTIVE.objects.link(obj)
     obj.location = location
 
+# Lava lontana: luci calde basse sotto le colonne di fumo. Il fumo, rischiarato
+# dal basso, diventa il fondale luminoso contro cui si staglia la porta.
+for name, location, energy, color, radius in [
+    ("Lava lontana | sotto il fumo sx", (-8.0, 33.0, 3.0), 3000, (1.0, 0.16, 0.025), 4.0),
+    ("Lava lontana | sotto il fumo dx", (8.0, 39.0, 3.0), 3500, (1.0, 0.15, 0.022), 4.0),
+    ("Lava lontana | dietro la porta", (-1.0, 50.0, 0.5), 11000, (1.0, 0.18, 0.03), 6.0),
+    ("Lava lontana | lago sinistro", (-31.0, 98.0, 1.5), 15000, (1.0, 0.14, 0.02), 8.0),
+    ("Lava lontana | lago destro", (19.0, 90.0, 1.5), 17000, (1.0, 0.14, 0.02), 9.0),
+    ("Lava lontana | fiumi convergenti", (0.0, 70.0, 1.0), 9000, (1.0, 0.15, 0.02), 8.0),
+]:
+    data = bpy.data.lights.new(name, "POINT")
+    data.energy = energy
+    data.color = color
+    data.shadow_soft_size = radius
+    obj = bpy.data.objects.new(name, data)
+    ACTIVE.objects.link(obj)
+    obj.location = location
+
+# Controluce radente: la lava alle spalle sfiora i profili delle rupi e dei massi.
+for side in (-1, 1):
+    add_area_light(f"Controluce della lava | profili delle rupi {side:+d}",
+                   (side * 22.0, 30.0, 2.5), (side * 13.0, -12.0, 1.0),
+                   9000, (1.0, 0.20, 0.04), 14.0, shape="RECTANGLE")
+    bpy.data.objects[f"Controluce della lava | profili delle rupi {side:+d}"].visible_camera = False
+# Luna e taglio blu restano sulle superfici ma non accendono la foschia: il
+# volume si colora solo del calore della soglia e della lava.
+for nome in ("Luna | luce principale", "Luce di taglio | blu abissale", "Luce alta | pietra e frontone",
+             "Rimbalzo tenue | lettura degli intagli"):
+    bpy.data.objects[nome].visible_volume_scatter = False
+
 # Portrait camera, slightly off-axis for visible jamb depth and open door thickness.
+# Più arretrata e più bassa: lascia respirare l'ambiente attorno alla porta, che
+# resta al centro ottico dell'inquadratura e nel piano di fuoco.
 cam_data = bpy.data.cameras.new("Camera | soglia dei dannati")
 cam = bpy.data.objects.new("Camera | soglia dei dannati",cam_data)
 ACTIVE.objects.link(cam)
-cam.location = (9.8,-32.0,10.8)
-target = Vector((0.0,-0.30,9.4))
+cam.location = (8.6,-46.0,9.5)
+target = Vector((0.0,-0.30,8.4))
 cam.rotation_euler = (target-Vector(cam.location)).to_track_quat("-Z","Y").to_euler()
-cam_data.lens = 50
+cam_data.lens = 52
+cam_data.clip_end = 600.0
 cam_data.dof.use_dof = True
 cam_data.dof.focus_object = None
-cam_data.dof.focus_distance = (target-Vector(cam.location)).length
+cam_data.dof.focus_distance = (Vector((0.0, -1.0, 4.5))-Vector(cam.location)).length
 cam_data.dof.aperture_fstop = 9.0
 scene.camera = cam
 
@@ -3355,6 +4006,7 @@ scene["Nota"] = "Modello procedurale dettagliato: geometria, battenti apribili, 
 scene["Calore infernale"] = "Vene di magma tra i conci, lago di lava nella profondità della porta, fuoriuscite di fuoco: emissione + luci fisiche, riflessi e rimbalzi caldi in Cycles."
 scene["Edizione"] = "II • Intagli, sculture cave e muratura erosa"
 scene["Dettagli modellati"] = "Orbite/naso scavati, 16 denti per cranio, corna rastremate, acanto, trafori, anime in rilievo, meccanica dei cardini, conci scheggiati."
+scene["Ambiente infernale"] = "Valle di terreno vulcanico nero, rupi e massi fratturati, foschia di cenere e colonne di fumo volumetrico, braci sospese concentrate sulla soglia, fiumi di lava solo in lontananza: la porta resta il punto focale."
 scene["Seed"] = 73
 scene["Camere di dettaglio"] = "Battenti • Corona e trafori • Custode"
 scene["Dimensioni indicative"] = "circa 15,0 x 18,5 x 6,0 unità Blender"
@@ -3417,6 +4069,15 @@ e torri; un lago di lava con croste e vene vive occupa la profondità della
 porta, chiuso da una parete fusa; piccole fuoriuscite di fuoco e faville
 seguono le crepe. L'emissione del magma e le luci puntiformi dedicate
 producono riflessi e luce indiretta arancione/rossa sulle superfici vicine.
+
+AMBIENTE INFERNALE
+La porta è il punto più luminoso e contrastato: l'ambiente le fa da cornice.
+Terreno vulcanico nero (heightfield reale) piatto attorno alla soglia, che si
+alza in una valle verso i bordi. Rupi e massi a facce di frattura, più bassi
+vicino al monumento. Foschia di cenere più densa al suolo e colonne di fumo
+volumetrico (Principled Volume) illuminate dal basso dalla lava lontana.
+Braci con scia concentrate sulla soglia, cenere opaca rada davanti alla porta.
+Luna e luci fredde non accendono la foschia (visibilità Volume Scatter spenta).
 
 Rigenera con porta_inferno.py. Usa -- --no-render per il solo modello.
 Il codice del generatore è incluso nel blocco di testo 'porta_inferno.py'.
