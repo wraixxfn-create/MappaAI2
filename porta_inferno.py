@@ -1667,7 +1667,7 @@ for i, (yy, width, zz, thick) in enumerate([
 
 # Scattered glowing cracks and embers on the approach.
 use_collection("04 • Oltretomba | fuoco, lava, catene")
-crack_glow = emission_material("Spaccature | filamento di lava", (1.0, 0.085, 0.006), 2.8)
+crack_glow = emission_material("Spaccature | filamento di lava", (1.0, 0.085, 0.006), 3.8)
 for ci, points in enumerate([
     [(-4.8,-4.1,0.145),(-3.9,-4.3,0.145),(-3.2,-4.75,0.145),(-2.5,-4.9,0.145)],
     [(3.7,-3.7,0.145),(3.0,-4.15,0.145),(3.35,-4.9,0.145),(2.7,-5.35,0.145)],
@@ -2473,9 +2473,9 @@ for side in (-1,1):
         flame_shape(f"Fiamma del braciere {side:+d}.{fi+1}",
                     x+(fi-1)*0.13,-1.59,6.48,0.23,random.uniform(0.55,1.15),
                     [flame_orange,ember,flame_red][fi],lean=random.uniform(-0.10,0.10))
-    # Point lights are warm but restrained; the portal remains the focal point.
+    # Point lights warm the facciata: part of the infernal key family.
     ld = bpy.data.lights.new(f"Luce del braciere {side:+d}", "POINT")
-    ld.energy = 190
+    ld.energy = 380
     ld.color = (1.0,0.16,0.025)
     ld.shadow_soft_size = 0.55
     lo = bpy.data.objects.new(f"Luce del braciere {side:+d}", ld)
@@ -2958,7 +2958,7 @@ hout = hn.new("ShaderNodeOutputMaterial")
 hout.location = (620, 0)
 hem = hn.new("ShaderNodeEmission")
 hem.location = (380, 0)
-hem.inputs["Strength"].default_value = 8.0
+hem.inputs["Strength"].default_value = 10.0
 hgeo = hn.new("ShaderNodeNewGeometry")
 hgeo.location = (-900, 30)
 hnoi = hn.new("ShaderNodeTexNoise")
@@ -2990,7 +2990,7 @@ dout = dn.new("ShaderNodeOutputMaterial")
 dout.location = (650, 0)
 dem = dn.new("ShaderNodeEmission")
 dem.location = (420, 0)
-dem.inputs["Strength"].default_value = 4.8
+dem.inputs["Strength"].default_value = 6.5
 dco = dn.new("ShaderNodeTexCoord")
 dco.location = (-640, 30)
 dnoi = dn.new("ShaderNodeTexNoise")
@@ -3635,10 +3635,13 @@ def volume_ellissoide(name, centro, semiassi, material, rot_z=0.0):
     return obj
 
 
-# Foschia di cenere che avvolge tutta la valle, più spessa al suolo. È questa a
-# trasformare il bagliore della soglia in un alone e la lava in controluce.
+# Volumetric fog: foschia di cenere che avvolge tutta la valle, più spessa al
+# suolo. È questa a trasformare il bagliore della soglia in un alone e la lava
+# in controluce. Densità e anisotropia alzate perché la luce rossa della porta
+# e delle crepe si legga come fascio diffuso nel fumo (solo le luci calde
+# illuminano il volume).
 foschia_mat = materiale_volume("Foschia di cenere | atmosfera della valle",
-                               (0.62, 0.50, 0.45), 0.0042, 0.035, 0.18, anisotropia=0.45,
+                               (0.62, 0.50, 0.45), 0.0060, 0.035, 0.18, anisotropia=0.52,
                                quota=(0.0, 16.0, 0.05), bordo=False)
 foschia = add_box("Atmosfera | foschia di cenere", (0.0, 70.0, 20.0), (300.0, 250.0, 46.0),
                   foschia_mat, 0.0)
@@ -3657,7 +3660,7 @@ for i, (x, y, z, sx, sy, sz) in enumerate([
 
 # Banchi di fumo radente ai lati del piazzale (mai davanti alla soglia).
 fumo_basso = materiale_volume("Fumo radente | nebbia di zolfo e cenere",
-                              (0.42, 0.34, 0.30), 0.20, 3.0, 0.44, anisotropia=0.35)
+                              (0.42, 0.34, 0.30), 0.30, 3.0, 0.44, anisotropia=0.40)
 for side in (-1, 1):
     volume_ellissoide(f"Fumo radente {side:+d}", (side * 19.0, -2.0, 0.6), (9.0, 13.0, 2.6), fumo_basso)
     volume_ellissoide(f"Fumo radente lontano {side:+d}", (side * 16.0, 18.0, 1.2), (12.0, 7.0, 3.5), fumo_basso)
@@ -3793,7 +3796,7 @@ w_sep = world.node_tree.nodes.new("ShaderNodeSeparateXYZ"); w_sep.location = (-4
 w_ramp = world.node_tree.nodes.new("ShaderNodeValToRGB"); w_ramp.location = (60, 0)
 w_ramp.label = "Orizzonte arrossato → cielo di fumo"
 w_ramp.color_ramp.elements[0].position = 0.50
-w_ramp.color_ramp.elements[0].color = (0.050, 0.010, 0.004, 1)
+w_ramp.color_ramp.elements[0].color = (0.034, 0.0075, 0.003, 1)
 w_mid = w_ramp.color_ramp.elements.new(0.56); w_mid.color = (0.016, 0.0045, 0.003, 1)
 w_ramp.color_ramp.elements[2].position = 0.80
 w_ramp.color_ramp.elements[2].color = (0.0025, 0.0018, 0.0020, 1)
@@ -3809,7 +3812,7 @@ wl.new(w_bg.outputs["Background"], w_out.inputs["Surface"])
 world.name = "Cielo di fumo | orizzonte arrossato dalla lava"
 
 # -----------------------------------------------------------------------------
-# Camera and cinematic light
+# Camera e illuminazione cinematografica
 # -----------------------------------------------------------------------------
 
 use_collection("05 • Scena | terreno, camera, luci")
@@ -3826,25 +3829,37 @@ def add_area_light(name, location, target, energy, color, size, shape="DISK"):
     obj.rotation_euler = (Vector(target)-obj.location).to_track_quat("-Z","Y").to_euler()
     return obj
 
-# Cool moonlight carves the basalt; hot light leaks from inside the gate.
-add_area_light("Luna | luce principale", (-9.5,-12.5,17.5), (0,0,7.4),
-               2600, (0.60,0.72,1.0), 9.0)
+# Illuminazione drammatica e cinematografica. La chiave NON è più la luna:
+# la fonte principale è il calore rosso/arancio che esce dalla porta socchiusa
+# e dalle crepe incandescenti (luci puntiformi più sotto). L'ambiente esterno
+# contribuisce solo con una debole luce fredda, per il contrasto cromatico
+# caldo/freddo; nessun riempimento neutro, così le ombre restano profonde.
+add_area_light("Luna | debole luce fredda d'ambiente", (-9.5,-12.5,17.5), (0,0,7.4),
+               1100, (0.45,0.60,1.0), 12.0)
 add_area_light("Riflesso cremisi | lato destro", (9.5,-8.0,9.0), (0,0,5.5),
-               1700, (1.0,0.23,0.10), 8.0)
+               520, (1.0,0.23,0.10), 8.0)
 add_area_light("Luce di taglio | blu abissale", (3.5,3.5,15.0), (0,0,8.0),
-               2800, (0.15,0.28,1.0), 7.0)
-add_area_light("Luce alta | pietra e frontone", (-1.0,1.0,20.0), (0,0,10.0),
-               1250, (0.72,0.54,0.35), 6.0)
-# Riempimento neutro tenue: svela gli intagli del ferro, senza lavare le ombre.
-add_area_light("Rimbalzo tenue | lettura degli intagli", (0, -12.5, 10.0), (0, -0.8, 7.1),
-               600, (0.77, 0.73, 0.67), 6.0)
+               650, (0.15,0.28,1.0), 7.0)
 
+# Strong rim lighting: profili di corona, frontone e torri tracciati da luce
+# fredda radente proveniente da dietro/lati. La sagoma scura si stacca netta
+# dal bagliore caldo della soglia (controluce freddo contro chiave calda).
+rim_corona = add_area_light("Rim freddo | profilo della corona", (0.0,16.0,24.0), (0.0,0.0,9.5),
+                            4500, (0.42,0.60,1.0), 11.0)
+rim_corona.visible_camera = False
+rim_torre = add_area_light("Rim freddo | torre spezzata", (-13.0,9.0,15.0), (-5.5,0.0,8.0),
+                           2200, (0.45,0.62,1.0), 7.0)
+rim_torre.visible_camera = False
+
+# La fonte luminosa principale: il cuore ardente oltre i battenti socchiusi.
+# Queste luci, insieme alle vene incandescenti più sotto, sono ora la chiave
+# della scena e bagnano di rosso/arancio la pietra del portale e i gradini.
 for name, location, energy, color, radius in [
-    ("Cuore della soglia", (0,1.45,3.2), 850, (1.0,0.075,0.018), 1.9),
-    ("Lava riflessa sui gradini", (0,-2.6,1.1), 300, (1.0,0.12,0.018), 2.4),
-    ("Rimbalzo rosso sulle ali", (-5.3,-1.9,3.4), 170, (0.9,0.06,0.018), 1.3),
-    ("Rimbalzo rosso sulle ali | dx", (5.3,-1.9,3.4), 170, (0.9,0.06,0.018), 1.3),
-    ("Brace della torre spezzata", (-6.7,-1.4,13.4), 120, (1.0,0.10,0.02), 1.1),
+    ("Cuore della soglia", (0,1.45,3.2), 2600, (1.0,0.075,0.018), 1.9),
+    ("Lava riflessa sui gradini", (0,-2.6,1.1), 800, (1.0,0.12,0.018), 2.4),
+    ("Rimbalzo rosso sulle ali", (-5.3,-1.9,3.4), 340, (0.9,0.06,0.018), 1.3),
+    ("Rimbalzo rosso sulle ali | dx", (5.3,-1.9,3.4), 340, (0.9,0.06,0.018), 1.3),
+    ("Brace della torre spezzata", (-6.7,-1.4,13.4), 260, (1.0,0.10,0.02), 1.1),
 ]:
     data = bpy.data.lights.new(name,"POINT")
     data.energy = energy
@@ -3857,19 +3872,21 @@ for name, location, energy, color, radius in [
 # Physical lights for the infernal heat fused into the masonry: every vein,
 # vent and lava mirror casts its own warm light, so Cycles spreads real
 # reflections and orange/red indirect bounce across the nearby basalt.
+# Le crepe incandescenti sono la seconda fonte della scena: energia triplicata
+# perché ogni giunto ardente disegni il proprio alone sulla pietra.
 for name, location, energy, color, radius in [
-    ("Vampa dell'abisso | cuore", (0,1.95,2.7), 1500, (1.0,0.16,0.02), 2.0),
-    ("Lago di lava | specchio sx", (-1.15,0.55,1.7), 420, (1.0,0.10,0.012), 1.3),
-    ("Lago di lava | specchio dx", (1.25,0.55,2.6), 420, (1.0,0.10,0.012), 1.3),
-    ("Vena dei piloni | sx", (-3.62,-1.30,2.85), 300, (1.0,0.12,0.02), 1.0),
-    ("Vena dei piloni | dx", (3.62,-1.30,2.85), 300, (1.0,0.12,0.02), 1.0),
-    ("Vena delle spalle | sx", (-5.38,-1.35,6.1), 260, (1.0,0.10,0.02), 1.0),
-    ("Vena delle spalle | dx", (5.38,-1.35,6.1), 260, (1.0,0.10,0.02), 1.0),
-    ("Giunti ardenti dell'arco", (0,-1.60,7.2), 320, (1.0,0.14,0.02), 1.8),
-    ("Colata oltre la soglia", (0.5,-0.85,0.62), 260, (1.0,0.11,0.02), 0.9),
-    ("Vena della torre | sx", (-6.80,-2.35,2.2), 220, (1.0,0.09,0.02), 1.0),
-    ("Vena della torre | dx", (6.80,-2.35,2.6), 220, (1.0,0.09,0.02), 1.0),
-    ("Braci del crollo | viva", (-6.7,-1.35,13.7), 180, (1.0,0.10,0.02), 0.8),
+    ("Vampa dell'abisso | cuore", (0,1.95,2.7), 5200, (1.0,0.16,0.02), 2.0),
+    ("Lago di lava | specchio sx", (-1.15,0.55,1.7), 1000, (1.0,0.10,0.012), 1.3),
+    ("Lago di lava | specchio dx", (1.25,0.55,2.6), 1000, (1.0,0.10,0.012), 1.3),
+    ("Vena dei piloni | sx", (-3.62,-1.30,2.85), 750, (1.0,0.12,0.02), 1.0),
+    ("Vena dei piloni | dx", (3.62,-1.30,2.85), 750, (1.0,0.12,0.02), 1.0),
+    ("Vena delle spalle | sx", (-5.38,-1.35,6.1), 650, (1.0,0.10,0.02), 1.0),
+    ("Vena delle spalle | dx", (5.38,-1.35,6.1), 650, (1.0,0.10,0.02), 1.0),
+    ("Giunti ardenti dell'arco", (0,-1.60,7.2), 800, (1.0,0.14,0.02), 1.8),
+    ("Colata oltre la soglia", (0.5,-0.85,0.62), 620, (1.0,0.11,0.02), 0.9),
+    ("Vena della torre | sx", (-6.80,-2.35,2.2), 540, (1.0,0.09,0.02), 1.0),
+    ("Vena della torre | dx", (6.80,-2.35,2.6), 540, (1.0,0.09,0.02), 1.0),
+    ("Braci del crollo | viva", (-6.7,-1.35,13.7), 420, (1.0,0.10,0.02), 0.8),
 ]:
     data = bpy.data.lights.new(name,"POINT")
     data.energy = energy
@@ -3882,12 +3899,12 @@ for name, location, energy, color, radius in [
 # Lava lontana: luci calde basse sotto le colonne di fumo. Il fumo, rischiarato
 # dal basso, diventa il fondale luminoso contro cui si staglia la porta.
 for name, location, energy, color, radius in [
-    ("Lava lontana | sotto il fumo sx", (-8.0, 33.0, 3.0), 3000, (1.0, 0.16, 0.025), 4.0),
-    ("Lava lontana | sotto il fumo dx", (8.0, 39.0, 3.0), 3500, (1.0, 0.15, 0.022), 4.0),
-    ("Lava lontana | dietro la porta", (-1.0, 50.0, 0.5), 11000, (1.0, 0.18, 0.03), 6.0),
-    ("Lava lontana | lago sinistro", (-31.0, 98.0, 1.5), 15000, (1.0, 0.14, 0.02), 8.0),
-    ("Lava lontana | lago destro", (19.0, 90.0, 1.5), 17000, (1.0, 0.14, 0.02), 9.0),
-    ("Lava lontana | fiumi convergenti", (0.0, 70.0, 1.0), 9000, (1.0, 0.15, 0.02), 8.0),
+    ("Lava lontana | sotto il fumo sx", (-8.0, 33.0, 3.0), 2200, (1.0, 0.16, 0.025), 4.0),
+    ("Lava lontana | sotto il fumo dx", (8.0, 39.0, 3.0), 2600, (1.0, 0.15, 0.022), 4.0),
+    ("Lava lontana | dietro la porta", (-1.0, 50.0, 0.5), 7000, (1.0, 0.18, 0.03), 6.0),
+    ("Lava lontana | lago sinistro", (-31.0, 98.0, 1.5), 10500, (1.0, 0.14, 0.02), 8.0),
+    ("Lava lontana | lago destro", (19.0, 90.0, 1.5), 12000, (1.0, 0.14, 0.02), 9.0),
+    ("Lava lontana | fiumi convergenti", (0.0, 70.0, 1.0), 6000, (1.0, 0.15, 0.02), 8.0),
 ]:
     data = bpy.data.lights.new(name, "POINT")
     data.energy = energy
@@ -3901,12 +3918,13 @@ for name, location, energy, color, radius in [
 for side in (-1, 1):
     add_area_light(f"Controluce della lava | profili delle rupi {side:+d}",
                    (side * 22.0, 30.0, 2.5), (side * 13.0, -12.0, 1.0),
-                   9000, (1.0, 0.20, 0.04), 14.0, shape="RECTANGLE")
+                   12000, (1.0, 0.20, 0.04), 14.0, shape="RECTANGLE")
     bpy.data.objects[f"Controluce della lava | profili delle rupi {side:+d}"].visible_camera = False
-# Luna e taglio blu restano sulle superfici ma non accendono la foschia: il
-# volume si colora solo del calore della soglia e della lava.
-for nome in ("Luna | luce principale", "Luce di taglio | blu abissale", "Luce alta | pietra e frontone",
-             "Rimbalzo tenue | lettura degli intagli"):
+# Le luci fredde (luna, taglio blu, rim) restano sulle superfici ma non
+# accendono la foschia: il volumetric fog si colora solo del calore rosso e
+# arancio della soglia, delle crepe e della lava.
+for nome in ("Luna | debole luce fredda d'ambiente", "Luce di taglio | blu abissale",
+             "Rim freddo | profilo della corona", "Rim freddo | torre spezzata"):
     bpy.data.objects[nome].visible_volume_scatter = False
 
 # Portrait camera, slightly off-axis for visible jamb depth and open door thickness.
@@ -4005,6 +4023,7 @@ scene["Iscrizione"] = "Lasciate ogni speranza, voi ch'entrate"
 scene["Nota"] = "Modello procedurale dettagliato: geometria, battenti apribili, intagli e shader modificabili."
 scene["Calore infernale"] = "Vene di magma tra i conci, lago di lava nella profondità della porta, fuoriuscite di fuoco: emissione + luci fisiche, riflessi e rimbalzi caldi in Cycles."
 scene["Edizione"] = "II • Intagli, sculture cave e muratura erosa"
+scene["Illuminazione"] = "Chiave rossa/arancio dall'interno della porta e dalle crepe incandescenti; debole luce fredda d'ambiente per il contrasto cromatico; ombre profonde, volumetric fog acceso solo dal calore, forte rim lighting fredda sui profili e controluce caldo della lava sulle rupi."
 scene["Dettagli modellati"] = "Orbite/naso scavati, 16 denti per cranio, corna rastremate, acanto, trafori, anime in rilievo, meccanica dei cardini, conci scheggiati."
 scene["Ambiente infernale"] = "Valle di terreno vulcanico nero, rupi e massi fratturati, foschia di cenere e colonne di fumo volumetrico, braci sospese concentrate sulla soglia, fiumi di lava solo in lontananza: la porta resta il punto focale."
 scene["Seed"] = 73
@@ -4069,6 +4088,15 @@ e torri; un lago di lava con croste e vene vive occupa la profondità della
 porta, chiuso da una parete fusa; piccole fuoriuscite di fuoco e faville
 seguono le crepe. L'emissione del magma e le luci puntiformi dedicate
 producono riflessi e luce indiretta arancione/rossa sulle superfici vicine.
+
+ILLUMINAZIONE CINEMATOGRAFICA
+La fonte principale è il calore che esce dalla porta socchiusa e dalle crepe
+incandescenti: rosso e arancio bagnano la pietra, i gradini e i bassorilievi.
+L'ambiente esterno porta solo una debole luce fredda (luna e taglio blu) per
+il contrasto cromatico; nessun riempimento neutro, quindi ombre profonde.
+Volumetric fog acceso esclusivamente dalle luci calde: il bagliore della
+soglia diventa un alone diffuso nel fumo. Forte rim lighting fredda sui
+profili di corona e torri, controluce caldo della lava sulle rupi.
 
 AMBIENTE INFERNALE
 La porta è il punto più luminoso e contrastato: l'ambiente le fa da cornice.
