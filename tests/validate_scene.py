@@ -156,6 +156,41 @@ class DetailedGateTests(unittest.TestCase):
         finally:
             bpy.ops.wm.open_mainfile(filepath=str(options.blend.resolve()))
 
+    def test_human_figures_make_the_scale_monumental(self):
+        from mathutils import Vector
+
+        def world_z_extent(objs):
+            zs = []
+            for obj in objs:
+                for corner in obj.bound_box:
+                    zs.append((obj.matrix_world @ Vector(corner)).z)
+            return min(zs), max(zs)
+
+        figures = [o for o in bpy.data.objects if o.name.startswith('Figura umana |')]
+        self.assertGreaterEqual(len(figures), 7)
+        pilgrim = bpy.data.objects['Figura umana | Pellegrino sulla via']
+        bodies = [o for o in bpy.data.objects
+                  if o.name.startswith('Anima | Pellegrino sulla via')
+                  and '| bordone' not in o.name]  # il bastone non è statura
+        self.assertGreaterEqual(len(bodies), 8)
+        bpy.context.view_layer.update()
+        low, high = world_z_extent([pilgrim] + bodies)
+        altezza = high - low
+        self.assertGreater(altezza, 1.5)   # a real human, not a doll
+        self.assertLess(altezza, 2.2)
+        # The gate towers tens of metres: ~17 human heights to the trident.
+        masonry = bpy.data.collections['01 • Architettura | basalto e conci'].objects
+        _, top = world_z_extent(list(masonry))
+        self.assertGreater(top, 28.0)
+        self.assertGreater(top / altezza, 15.0)
+        # Low, ground-level camera: converging verticals, oppressive scale.
+        cam = bpy.data.objects['Camera | soglia dei dannati']
+        self.assertLess(cam.location.z, 4.0)
+        # Foreground figure between camera and gate, lit from behind by it.
+        px, py = pilgrim.location.x, pilgrim.location.y
+        cx, cy = cam.location.x, cam.location.y
+        self.assertLess((px - cx) ** 2 + (py - cy) ** 2, (0 - cx) ** 2 + (0 - cy) ** 2)
+
     def test_mesh_coordinates_and_transforms_are_finite(self):
         import math
         for obj in bpy.data.objects:

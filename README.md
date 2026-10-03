@@ -1,17 +1,28 @@
-# La Porta dell'Inferno — Blender · Edizione II
+# La Porta dell'Inferno — Blender · Edizione III
 
 Modello 3D originale ispirato all'**Inferno, Canto III** di Dante: portale gotico in basalto con tre ordini di archi a sesto acuto, torri contrafforte asimmetriche, frontone spezzato, battenti di ferro socchiusi, custodi alati, catene, fuoco e l'iscrizione *«Lasciate ogni speranza, voi ch'entrate»*. La porta si trova ora al centro di un **ambiente infernale cinematografico**: valle vulcanica nera, rupi fratturate, cenere e fumo volumetrico, braci sospese e lava in lontananza.
 
 **Questa edizione aggiunge dettaglio alla geometria, non soltanto ai materiali.** Intagli, sculture, scheggiature, pieghe e meccanismi restano visibili anche senza texture.
 
+## Scala umana, monumento opprimente
+
+Il portale è alto **~29,6 m** (il tridente sfiora i trenta metri: *decine di metri* di basalto), circa **17 volte la statura di un uomo**. La scala si legge a colpo d'occhio grazie a **sette figure umane di ~1,78 m** costruite nella scena:
+
+- il **pellegrino col bordone** in primo piano, sagoma controluce contro i gradini illuminati dal varco, un braccio levato a schermare gli occhi;
+- **tre dannati alla soglia**: uno inginocchiato sull'ultimo gradino (alzate di ~0,6 m), due che arrancano curvi sul selciato;
+- **tre anime in processione** nelle dune di cenere, sempre più piccole e sfumate nella foschia verso il varco.
+
+La camera principale è a **1,95 m dal suolo** (occhio umano) e guarda verso l'alto: le verticali convergono, la corona e il tridente fuggono verso l'alto del fotogramma e la base monumentale schiaccia il primo piano. Ogni elemento architettonico è stato scalato uniformemente (×1,6) sull'origine: proporzioni, cardini e intagli restano esatti, e le luci della soglia seguono il monumento con la legge dell'inverso del quadrato.
+
 ## Apri il modello
 
 Apri **`porta_dell_inferno.blend`** in Blender **4.5 o successivo**. La scena è già inquadrata; premi **F12** per il render finale.
 
-- **3.581 oggetti**, organizzati in **6 collezioni**; le piccole primitive condividono le mesh per mantenere il progetto leggero.
-- **32 materiali** inclusi (tre sono volumi procedurali), senza texture, font o librerie esterne da scaricare.
+- **3.658 oggetti**, organizzati in **6 collezioni**; le piccole primitive condividono le mesh per mantenere il progetto leggero.
+- **36 materiali** inclusi (tre sono volumi procedurali), senza texture, font o librerie esterne da scaricare.
 - Render finale: **Cycles CPU, 2000 × 2320 px, 128 campioni massimi**, adaptive sampling e denoise accurato.
-- **4 camere**: inquadratura principale (più arretrata, per mostrare l'ambiente) e dettagli di battenti, corona/trafori e custode. Seleziona una camera di dettaglio nell'Outliner e premi **Ctrl + Numpad 0**.
+- **4 camere**: inquadratura principale radente al suolo (1,95 m, verticali convergenti) e dettagli di battenti, corona/trafori e custode. Seleziona una camera di dettaglio nell'Outliner e premi **Ctrl + Numpad 0**.
+- **Sette figure umane di riferimento** (~1,78 m) negli empty `Figura umana | …`: pellegrino, dannati della soglia e processione; vedi *Scala umana, monumento opprimente*.
 - I battenti sono figli degli empty **Cardine del battente sinistro/destro**: ruotali su **Z** per cambiare l'apertura. Anche i nuovi intagli, le anime in rilievo e le serrature seguono il cardine.
 - Il generatore e una breve guida sono inclusi anche nei blocchi di testo del `.blend`.
 
@@ -123,7 +134,7 @@ blender --background --python tests/validate_scene.py -- \
   --blend porta_dell_inferno.blend
 ```
 
-I controlli verificano caricamento, materiali senza texture esterne, collezioni, iscrizione, impostazioni finali, camere, geometria finita, conci chiusi e orientati, profondità delle orbite con ray cast e l'effettivo movimento dei nuovi dettagli con i cardini. Il test non salva né altera il modello su disco.
+I controlli verificano caricamento, materiali senza texture esterne, collezioni, iscrizione, impostazioni finali, camere, geometria finita, conci chiusi e orientati, profondità delle orbite con ray cast, l'effettivo movimento dei nuovi dettagli con i cardini e la **scala umana**: statura delle figure (1,5–2,2 m), sommità del monumento oltre 28 m, rapporto monumento/uomo > 15 e camera radente al suolo. Il test non salva né altera il modello su disco.
 
 Per confrontare anche geometria, curve e trasformazioni dopo una rigenerazione indipendente:
 
