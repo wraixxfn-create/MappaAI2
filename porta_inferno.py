@@ -3176,6 +3176,22 @@ for k in (2, 3):
 # Tutto è generato con semi stabili (stable_rng): l'ambiente non sposta l'RNG
 # globale e non cambia la geometria del monumento.
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Monumental scale: the portal must tower *tens of metres* over whoever stands
+# below it. Everything built so far (masonry, iron doors, sculptures, carvings,
+# steps, approach slabs, magma veins, chains and rubble) is scaled uniformly
+# about the origin by SCALA_MONUMENTO (~18,5 m -> ~29,6 m alla sommità del
+# tridente). Only the root objects carry the transform, so every parented
+# hierarchy (cardini, intagli, rilievi) follows intact and le proporzioni
+# restano esatte. Le figure umane di ~1,78 m aggiunte più avanti diventano
+# così circa 1/17 dell'altezza della porta: la scala si legge a colpo d'occhio.
+# -----------------------------------------------------------------------------
+SCALA_MONUMENTO = 1.6
+for _obj in list(bpy.data.objects):
+    if _obj.parent is None:
+        _obj.location = Vector(_obj.location) * SCALA_MONUMENTO
+        _obj.scale = Vector(_obj.scale) * SCALA_MONUMENTO
+
 use_collection("05 • Scena | terreno, camera, luci")
 
 
@@ -3927,21 +3943,51 @@ for nome in ("Luna | debole luce fredda d'ambiente", "Luce di taglio | blu abiss
              "Rim freddo | profilo della corona", "Rim freddo | torre spezzata"):
     bpy.data.objects[nome].visible_volume_scatter = False
 
+# Il monumento è cresciuto di SCALA_MONUMENTO: le luci che lo investono (chiave
+# della soglia, vene, torri, luna e rim) lo seguono esattamente. Legge
+# dell'inverso del quadrato: energia x K^2 perché l'esposizione sulla pietra
+# resti identica alla distanza K volte maggiore.
+LUCI_CON_IL_MONUMENTO = (
+    "Luna | debole luce fredda d'ambiente", "Riflesso cremisi | lato destro",
+    "Luce di taglio | blu abissale", "Rim freddo | profilo della corona",
+    "Rim freddo | torre spezzata", "Cuore della soglia", "Lava riflessa sui gradini",
+    "Rimbalzo rosso sulle ali", "Rimbalzo rosso sulle ali | dx",
+    "Brace della torre spezzata", "Vampa dell'abisso | cuore",
+    "Lago di lava | specchio sx", "Lago di lava | specchio dx",
+    "Vena dei piloni | sx", "Vena dei piloni | dx", "Vena delle spalle | sx",
+    "Vena delle spalle | dx", "Giunti ardenti dell'arco", "Colata oltre la soglia",
+    "Vena della torre | sx", "Vena della torre | dx", "Braci del crollo | viva",
+)
+for nome in LUCI_CON_IL_MONUMENTO:
+    lamp = bpy.data.objects[nome]
+    lamp.location = Vector(lamp.location) * SCALA_MONUMENTO
+    lamp.data.energy *= SCALA_MONUMENTO ** 2
+    if lamp.data.type == "POINT":
+        lamp.data.shadow_soft_size *= SCALA_MONUMENTO
+    else:
+        lamp.data.size *= SCALA_MONUMENTO
+# Il nugolo di braci abbraccia la soglia ora più ampia: stessa forma, scala
+# monumentale (le faville diventano tizzoni trasportati dal calore).
+_braci = bpy.data.objects["Braci sospese | nugolo della soglia"]
+_braci.location = Vector(_braci.location) * SCALA_MONUMENTO
+_braci.scale = Vector(_braci.scale) * SCALA_MONUMENTO
+
 # Portrait camera, slightly off-axis for visible jamb depth and open door thickness.
-# Più arretrata e più bassa: lascia respirare l'ambiente attorno alla porta, che
-# resta al centro ottico dell'inquadratura e nel piano di fuoco.
+# RADICALEMENTE BASSA e vicina al suolo (~2,3 m, occhio umano): le verticali
+# convergono verso l'alto e la corona della porta fugge fuori campo. Con le
+# figure umane in primo piano la scala monumentale (~29,6 m) diventa opprimente.
 cam_data = bpy.data.cameras.new("Camera | soglia dei dannati")
 cam = bpy.data.objects.new("Camera | soglia dei dannati",cam_data)
 ACTIVE.objects.link(cam)
-cam.location = (8.6,-46.0,9.5)
-target = Vector((0.0,-0.30,8.4))
+cam.location = (9.2,-44.0,1.95)
+target = Vector((0.0,-0.50,11.80))
 cam.rotation_euler = (target-Vector(cam.location)).to_track_quat("-Z","Y").to_euler()
-cam_data.lens = 52
+cam_data.lens = 42
 cam_data.clip_end = 600.0
 cam_data.dof.use_dof = True
 cam_data.dof.focus_object = None
-cam_data.dof.focus_distance = (Vector((0.0, -1.0, 4.5))-Vector(cam.location)).length
-cam_data.dof.aperture_fstop = 9.0
+cam_data.dof.focus_distance = (Vector((0.0, -2.56, 11.52))-Vector(cam.location)).length
+cam_data.dof.aperture_fstop = 11.0
 scene.camera = cam
 
 # Camere di ispezione pronte nel .blend, senza modificare la composizione principale.
@@ -3956,9 +4002,122 @@ def detail_camera(name, location, target, lens):
     obj["Uso"] = "Seleziona questa camera e premi Ctrl+Numpad 0 per inquadrarne i dettagli."
     return obj
 
-door_camera = detail_camera("Camera | dettaglio battenti", (4.0, -13.5, 5.45), (0, -0.6, 4.75), 62)
-detail_camera("Camera | dettaglio corona e trafori", (2.8, -17.0, 14.1), (0, -0.6, 13.9), 70)
-detail_camera("Camera | dettaglio custode", (8.3, -8.1, 4.0), (5.6, -1.65, 3.05), 62)
+door_camera = detail_camera("Camera | dettaglio battenti", (6.40, -21.60, 8.72), (0, -0.96, 7.60), 62)
+detail_camera("Camera | dettaglio corona e trafori", (4.48, -27.20, 22.56), (0, -0.96, 22.24), 70)
+detail_camera("Camera | dettaglio custode", (13.28, -12.96, 6.40), (8.96, -2.64, 4.88), 62)
+
+# -----------------------------------------------------------------------------
+# Scala umana: anime vive, non statue. Figure di ~1,78 m disposte lungo
+# l'avvicinamento rendono leggibile la vera stazza della porta a colpo
+# d'occhio: il pellegrino in primo piano controluce, i dannati minuscoli sui
+# gradini della soglia, una processione che sfuma nella foschia di cenere.
+# Ogni figura è costruita in coordinate locali (+Y = fronte) e appesa a un
+# empty orientato verso la porta.
+# -----------------------------------------------------------------------------
+use_collection("05 • Scena | terreno, camera, luci")
+
+panno_scuro = principled_material("Panno del viandante | lana cenciosa",
+                                  (0.052, 0.040, 0.033, 1), roughness=0.93,
+                                  noise_scale=140.0, bump_strength=0.35)
+panno_cenere = principled_material("Panno del dannato | grigio cenere",
+                                   (0.115, 0.100, 0.088, 1), roughness=0.90,
+                                   noise_scale=120.0, bump_strength=0.30)
+carne_cinerea = principled_material("Carne del dannato | cinerea",
+                                    (0.240, 0.185, 0.155, 1), roughness=0.72)
+legno_bordone = principled_material("Legno del bordone | brunito",
+                                    (0.085, 0.058, 0.038, 1), roughness=0.80,
+                                    noise_scale=60.0, bump_strength=0.40)
+
+
+def anima_umana(tag, x, y, z, rot_z, posa="ritto", manto=None, altezza=1.78,
+                bastone=False, capo_chino=False):
+    """Figura umana di riferimento: proporzioni reali (~1,78 m) in stracci."""
+    manto = manto or panno_scuro
+    s = altezza / 1.78
+    root = parent_empty(f"Figura umana | {tag}", (x, y, z), rot_z)
+
+    def agg(obj):
+        obj.parent = root
+        return obj
+
+    if posa == "ginocchio":
+        agg(add_robe_mesh(f"Anima | {tag} | manto cencioso", 0, 0, 0,
+                          [(0.02*s, 0.34*s, 0.30*s, 0.0), (0.30*s, 0.30*s, 0.26*s, 0.0),
+                           (0.62*s, 0.26*s, 0.22*s, 0.0), (0.86*s, 0.20*s, 0.17*s, 0.0),
+                           (0.95*s, 0.15*s, 0.13*s, 0.0)], manto))
+        agg(add_tapered_tube(f"Anima | {tag} | busto", [(0, 0.02*s, 0.82*s),
+                              (0, 0.09*s, 1.05*s), (0, 0.15*s, 1.24*s)],
+                             [0.150*s, 0.125*s, 0.100*s], manto, sides=10))
+        hood_z, hood_rot, face = 1.34*s, -0.50, (0, 0.20*s, 1.28*s)
+        agg(add_cone(f"Anima | {tag} | cappuccio", (0, 0.10*s, hood_z),
+                     0.145*s, 0.045*s, 0.32*s, manto, vertices=12)).rotation_euler = (hood_rot, 0, 0)
+        agg(add_ico(f"Anima | {tag} | capo", (0, 0.13*s, 1.32*s),
+                    (0.095*s, 0.110*s, 0.120*s), carne_cinerea, subdivisions=2))
+        agg(add_ico(f"Anima | {tag} | ombra del volto", face,
+                    (0.068*s, 0.045*s, 0.080*s), void_mat, subdivisions=1))
+        for lato in (-1, 1):
+            agg(add_tapered_tube(f"Anima | {tag} | braccio {lato:+d}",
+                                 [(lato*0.13*s, 0.10*s, 1.15*s), (lato*0.16*s, 0.26*s, 0.95*s),
+                                  (lato*0.14*s, 0.36*s, 0.78*s)],
+                                 [0.042*s, 0.035*s, 0.028*s], manto, sides=8))
+            agg(add_ico(f"Anima | {tag} | mano {lato:+d}", (lato*0.13*s, 0.38*s, 0.75*s),
+                        (0.030*s, 0.042*s, 0.026*s), carne_cinerea, subdivisions=1))
+    else:
+        agg(add_robe_mesh(f"Anima | {tag} | manto cencioso", 0, 0, 0,
+                          [(0.02*s, 0.30*s, 0.26*s, 0.0), (0.30*s, 0.26*s, 0.22*s, 0.0),
+                           (0.78*s, 0.215*s, 0.185*s, 0.0), (1.12*s, 0.185*s, 0.160*s, 0.0),
+                           (1.40*s, 0.160*s, 0.140*s, 0.0), (1.50*s, 0.125*s, 0.110*s, 0.0)], manto))
+        agg(add_ico(f"Anima | {tag} | spalle", (0, 0, 1.44*s),
+                    (0.165*s, 0.105*s, 0.080*s), manto, subdivisions=1))
+        hood_rot = -0.35 if capo_chino else 0.30   # capo chino o levato alla porta
+        agg(add_cone(f"Anima | {tag} | cappuccio", (0, -0.015*s, 1.60*s),
+                     0.150*s, 0.045*s, 0.34*s, manto, vertices=12)).rotation_euler = (hood_rot, 0, 0)
+        agg(add_ico(f"Anima | {tag} | capo", (0, 0.01*s, 1.58*s),
+                    (0.100*s, 0.115*s, 0.130*s), carne_cinerea, subdivisions=2))
+        agg(add_ico(f"Anima | {tag} | ombra del volto",
+                    (0, 0.10*s, 1.55*s) if capo_chino else (0, 0.095*s, 1.585*s),
+                    (0.070*s, 0.045*s, 0.085*s), void_mat, subdivisions=1))
+        if capo_chino:
+            braccia = ((0.155, 0.03, 1.40, 0.20, 0.12, 1.10, 0.17, 0.22, 0.86),
+                       (-0.155, 0.03, 1.40, -0.20, 0.12, 1.10, -0.17, 0.22, 0.86))
+        else:
+            braccia = ((0.155, 0.02, 1.40, 0.235, 0.13, 1.28, 0.195, 0.28, 1.50),
+                       (-0.155, 0.02, 1.40, -0.215, 0.09, 1.14, -0.195, 0.20, 0.96))
+        for lato, b in zip((1, -1), braccia):
+            pts = [(b[0]*s, b[1]*s, b[2]*s), (b[3]*s, b[4]*s, b[5]*s), (b[6]*s, b[7]*s, b[8]*s)]
+            if lato == 1 and not capo_chino:   # mano levata a schermare gli occhi
+                pts.append((0.10*s, 0.34*s, 1.60*s))
+            agg(add_tapered_tube(f"Anima | {tag} | braccio {lato:+d}", pts,
+                                 [0.048*s, 0.040*s, 0.033*s] + ([0.028*s] if len(pts) == 4 else []),
+                                 manto, sides=8))
+            agg(add_ico(f"Anima | {tag} | mano {lato:+d}", pts[-1],
+                        (0.030*s, 0.042*s, 0.026*s), carne_cinerea, subdivisions=1))
+        agg(add_torus(f"Anima | {tag} | corda dei fianchi", (0, 0, 1.02*s),
+                      0.185*s, 0.016*s, legno_bordone, rotation=(0.06, 0, 0)))
+        if bastone:
+            agg(add_rod(f"Anima | {tag} | bordone", (-0.20*s, 0.24*s, 0.0),
+                        (-0.155*s, 0.17*s, 2.05*s), 0.024*s, legno_bordone, vertices=10))
+    return root
+
+
+# Il pellegrino: primo piano nel terzo sinistro, sagoma controluce contro i
+# gradini illuminati dal varco: la sua stazza vera (1,78 m) è il metro di tutto.
+anima_umana("Pellegrino sulla via", 3.6, -29.5, quota_terreno(3.6, -29.5) - 0.06,
+            math.atan2(-3.6, 29.5), bastone=True)
+# I dannati della soglia: minuscoli sui gradini monumentali (alzate ~0,6 m).
+anima_umana("Dannato inginocchiato sui gradini", 2.6, -4.7, 1.42,
+            math.atan2(-2.6, 4.7), posa="ginocchio", manto=panno_cenere)
+anima_umana("Dannato curvo sul gradino", -3.9, -2.5, 0.82,
+            math.atan2(3.9, 2.5), capo_chino=True, manto=panno_cenere)
+anima_umana("Dannato che arranca sul selciato", -0.9, -7.6, 0.10,
+            math.atan2(0.9, 7.6), capo_chino=True, manto=panno_cenere)
+# Processione nelle dune di cenere: le sagome sfumano nella foschia e danno
+# profondità alla scala: ogni figura è più piccola e più lontana della precedente.
+for _i, (_px, _py) in enumerate([(8.7, -32.0), (8.9, -27.5), (7.9, -23.5)]):
+    anima_umana(f"Anima in cammino {_i+1}", _px, _py, quota_terreno(_px, _py) - 0.10,
+                math.atan2(-_px, -_py), capo_chino=(_i % 2 == 1),
+                manto=panno_cenere if _i % 2 else panno_scuro,
+                altezza=1.72 + 0.06 * (_i % 2))
 
 # Cycles CPU is deterministic and works without a GPU; denoising preserves small carvings.
 scene.render.engine = "CYCLES"
@@ -3990,7 +4149,8 @@ try:
     scene.view_settings.look = "AgX - Medium High Contrast"
 except Exception:
     pass
-scene.view_settings.exposure = 0.0
+# +1/4 stop: la muratura monumentale resta leggibile nell'ombra profonda.
+scene.view_settings.exposure = 0.25
 scene.view_settings.gamma = 1.0
 scene.render.resolution_percentage = 100
 
@@ -4022,21 +4182,25 @@ scene["Opera"] = "La Porta dell'Inferno — interpretazione originale da Inferno
 scene["Iscrizione"] = "Lasciate ogni speranza, voi ch'entrate"
 scene["Nota"] = "Modello procedurale dettagliato: geometria, battenti apribili, intagli e shader modificabili."
 scene["Calore infernale"] = "Vene di magma tra i conci, lago di lava nella profondità della porta, fuoriuscite di fuoco: emissione + luci fisiche, riflessi e rimbalzi caldi in Cycles."
-scene["Edizione"] = "II • Intagli, sculture cave e muratura erosa"
+scene["Edizione"] = "III • Scala monumentale (~29,6 m) e figure umane di riferimento"
 scene["Illuminazione"] = "Chiave rossa/arancio dall'interno della porta e dalle crepe incandescenti; debole luce fredda d'ambiente per il contrasto cromatico; ombre profonde, volumetric fog acceso solo dal calore, forte rim lighting fredda sui profili e controluce caldo della lava sulle rupi."
 scene["Dettagli modellati"] = "Orbite/naso scavati, 16 denti per cranio, corna rastremate, acanto, trafori, anime in rilievo, meccanica dei cardini, conci scheggiati."
 scene["Ambiente infernale"] = "Valle di terreno vulcanico nero, rupi e massi fratturati, foschia di cenere e colonne di fumo volumetrico, braci sospese concentrate sulla soglia, fiumi di lava solo in lontananza: la porta resta il punto focale."
 scene["Seed"] = 73
 scene["Camere di dettaglio"] = "Battenti • Corona e trafori • Custode"
-scene["Dimensioni indicative"] = "circa 15,0 x 18,5 x 6,0 unità Blender"
+scene["Dimensioni indicative"] = "circa 24,0 x 29,6 x 9,6 unità Blender (metri): il tridente svetta a ~29,6 m"
+scene["Scala umana"] = ("Sette figure umane di ~1,78 m (pellegrino col bordone in primo piano, "
+                        "tre dannati sui gradini della soglia, tre anime in processione tra le dune): "
+                        "la porta è alta circa 17 volte un uomo; camera a 2,3 m dal suolo con "
+                        "verticali convergenti per una scala opprimente.")
 
 # Make the project pleasant to inspect immediately after opening in Blender.
 for screen in bpy.data.screens:
     for area in screen.areas:
         if area.type == "VIEW_3D":
             space = area.spaces.active
-            space.region_3d.view_location = (0.0,-0.1,8.6)
-            space.region_3d.view_distance = 28.0
+            space.region_3d.view_location = (0.0,-0.1,13.8)
+            space.region_3d.view_distance = 45.0
             space.region_3d.view_rotation = cam.rotation_euler.to_quaternion()
             space.region_3d.view_perspective = "PERSP"
             space.shading.type = "SOLID"
@@ -4065,7 +4229,15 @@ scene["Oggetti"] = len(bpy.data.objects)
 scene["Materiali"] = len(bpy.data.materials)
 scene["Vertici mesh (senza istanze)"] = sum(len(m.vertices) for m in bpy.data.meshes)
 readme = bpy.data.texts.new("LEGGIMI • Porta dell'Inferno dettagliata")
-readme.write("""LA PORTA DELL'INFERNO • EDIZIONE II
+readme.write("""LA PORTA DELL'INFERNO • EDIZIONE III
+
+SCALA UMANA E MONUMENTALE
+Il monumento è alto ~29,6 m (tridente compreso): decine di metri di basalto.
+Sette figure umane di ~1,78 m rendono la scala leggibile: il pellegrino col
+bordone in primo piano, controluce sul varco acceso; un dannato inginocchiato
+e due che arrancano sui gradini della soglia (alzate di ~0,6 m); tre anime in
+processione che sfumano nella foschia. Camera principale a 2,3 m dal suolo:
+le verticali convergono verso l'alto e la corona fugge dallo sguardo.
 
 F12: render principale (2000 × 2320, Cycles, 128 campioni/adaptive).
 Le tre camere 'dettaglio' permettono di esaminare battenti, corona e custode.
