@@ -946,7 +946,7 @@ stone = materiale_eroso(
          vaioli=(0.061, 0.50), schegge=(0.099, 0.55),
          bruciatura=(0.33, 0.62), cenere=0.46, fuliggine=0.42, usura=0.55,
          rilievo=(0.95, 0.055), microrilievo=(0.20, 0.006),
-         ruvido=0.88, metallico=0.02, vetrificato=0.30, brace=0.05))
+         ruvido=0.88, metallico=0.02, vetrificato=0.30, brace=0.03))
 
 stone_light = materiale_eroso(
     "Tufo vulcanico | conci chiari e spigoli consumati",
@@ -985,7 +985,7 @@ stone_dark = materiale_eroso(
          vaioli=(0.067, 0.55), schegge=(0.134, 0.85),
          bruciatura=(0.30, 0.85), cenere=0.36, fuliggine=0.60, usura=0.42,
          rilievo=(1.05, 0.065), microrilievo=(0.22, 0.007),
-         ruvido=0.92, metallico=0.03, vetrificato=0.45, brace=0.16))
+         ruvido=0.92, metallico=0.03, vetrificato=0.45, brace=0.11))
 
 stone_shadow = materiale_eroso(
     "Basalto in ombra | fondo profondo e polveroso",
@@ -1219,10 +1219,13 @@ def emission_material(name, color, strength=1.0):
     mat.node_tree.links.new(emission.outputs["Emission"], out.inputs["Surface"])
     return mat
 
-ember = emission_material("Fiamma | oro incandescente", (1.0, 0.24, 0.025), 4.0)
-flame_orange = emission_material("Fiamma | arancio infernale", (1.0, 0.055, 0.008), 2.4)
-flame_red = emission_material("Brace | rosso cremisi", (0.56, 0.018, 0.009), 1.5)
-eye_glow = emission_material("Occhi | brace viva", (1.0, 0.16, 0.018), 3.5)
+# Edizione IV — il buio ostile: tutto ciò che brucia è più spento e più
+# vecchio; il varco resta l'unica vera fonte di luce e gli occhi scolpiti
+# sono un bagliore morente, non una fonte.
+ember = emission_material("Fiamma | oro incandescente", (1.0, 0.24, 0.025), 2.0)
+flame_orange = emission_material("Fiamma | arancio infernale", (1.0, 0.055, 0.008), 2.0)
+flame_red = emission_material("Brace | rosso cremisi", (0.56, 0.018, 0.009), 1.1)
+eye_glow = emission_material("Occhi | brace morente", (1.0, 0.16, 0.018), 1.5)
 
 portal_mat = bpy.data.materials.new("Soglia | bagliore ctonio procedurale")
 portal_mat.use_nodes = True
@@ -1233,7 +1236,7 @@ pout = pn.new("ShaderNodeOutputMaterial")
 pout.location = (650, 0)
 pem = pn.new("ShaderNodeEmission")
 pem.location = (420, 0)
-pem.inputs["Strength"].default_value = 2.2
+pem.inputs["Strength"].default_value = 2.7
 pnoise = pn.new("ShaderNodeTexNoise")
 pnoise.location = (-420, 30)
 pnoise.inputs["Scale"].default_value = 5.0
@@ -1274,7 +1277,7 @@ lava_mat = materiale_eroso(
          vaioli=(0.083, 0.70), schegge=(0.226, 0.55),
          bruciatura=(0.30, 0.70), cenere=0.22, fuliggine=0.30, usura=0.25,
          rilievo=(1.00, 0.060), microrilievo=(0.22, 0.007),
-         ruvido=0.78, metallico=0.05, vetrificato=0.55, brace=1.35))
+         ruvido=0.78, metallico=0.05, vetrificato=0.55, brace=0.95))
 
 # -----------------------------------------------------------------------------
 # Geometry helpers
@@ -1667,7 +1670,7 @@ for i, (yy, width, zz, thick) in enumerate([
 
 # Scattered glowing cracks and embers on the approach.
 use_collection("04 • Oltretomba | fuoco, lava, catene")
-crack_glow = emission_material("Spaccature | filamento di lava", (1.0, 0.085, 0.006), 3.8)
+crack_glow = emission_material("Spaccature | filamento di lava", (1.0, 0.085, 0.006), 1.3)
 for ci, points in enumerate([
     [(-4.8,-4.1,0.145),(-3.9,-4.3,0.145),(-3.2,-4.75,0.145),(-2.5,-4.9,0.145)],
     [(3.7,-3.7,0.145),(3.0,-4.15,0.145),(3.35,-4.9,0.145),(2.7,-5.35,0.145)],
@@ -2475,7 +2478,7 @@ for side in (-1,1):
                     [flame_orange,ember,flame_red][fi],lean=random.uniform(-0.10,0.10))
     # Point lights warm the facciata: part of the infernal key family.
     ld = bpy.data.lights.new(f"Luce del braciere {side:+d}", "POINT")
-    ld.energy = 380
+    ld.energy = 140
     ld.color = (1.0,0.16,0.025)
     ld.shadow_soft_size = 0.55
     lo = bpy.data.objects.new(f"Luce del braciere {side:+d}", ld)
@@ -2805,7 +2808,7 @@ glass = principled_material("Vetro del rosone | cremisi scheggiato", (0.075, 0.0
 bsdf = next(n for n in glass.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
 bsdf.inputs["Coat Weight"].default_value = 0.35
 bsdf.inputs["Emission Color"].default_value = (0.08, 0.001, 0.006, 1)
-bsdf.inputs["Emission Strength"].default_value = 0.45
+bsdf.inputs["Emission Strength"].default_value = 0.25
 for i in range(6):
     theta = i * math.tau / 6
     petal = []
@@ -2958,7 +2961,7 @@ hout = hn.new("ShaderNodeOutputMaterial")
 hout.location = (620, 0)
 hem = hn.new("ShaderNodeEmission")
 hem.location = (380, 0)
-hem.inputs["Strength"].default_value = 10.0
+hem.inputs["Strength"].default_value = 6.5
 hgeo = hn.new("ShaderNodeNewGeometry")
 hgeo.location = (-900, 30)
 hnoi = hn.new("ShaderNodeTexNoise")
@@ -2990,7 +2993,7 @@ dout = dn.new("ShaderNodeOutputMaterial")
 dout.location = (650, 0)
 dem = dn.new("ShaderNodeEmission")
 dem.location = (420, 0)
-dem.inputs["Strength"].default_value = 6.5
+dem.inputs["Strength"].default_value = 5.5
 dco = dn.new("ShaderNodeTexCoord")
 dco.location = (-640, 30)
 dnoi = dn.new("ShaderNodeTexNoise")
@@ -3109,6 +3112,20 @@ deep_outline = [(-deep_w, 0.62), (deep_w, 0.62), (deep_w, 2.40)]
 deep_outline += arch_points(deep_w, 2.40, 4.60, side=1, steps=18)
 deep_outline += list(reversed(arch_points(deep_w, 2.40, 4.60, side=-1, steps=18)))[1:]
 add_arch_fill("Parete fusa | profondità della porta", deep_outline, 1.13, deep_lava)
+
+# Qualcosa di antico e ostile oltre la soglia: due cavità buie scavate nel
+# bagliore dell'abisso, e in ciascuna una fessura di luce morente — non
+# fiamme, ma occhi. La foschia del varco li lascia intravedere a tratti.
+occhi_ctoni = emission_material("Occhi ctoni | antico e ostile oltre la soglia",
+                                (0.72, 0.02, 0.004), 0.9)
+add_uv_sphere("Oltre la soglia | cavità sinistra", (-0.78, 1.16, 5.55),
+              (0.30, 0.05, 0.26), void_mat, segments=20, rings=12)
+add_uv_sphere("Oltre la soglia | cavità destra", (0.82, 1.16, 5.95),
+              (0.30, 0.05, 0.26), void_mat, segments=20, rings=12)
+add_uv_sphere("Oltre la soglia | occhio sinistro", (-0.78, 1.09, 5.55),
+              (0.085, 0.035, 0.055), occhi_ctoni, segments=12, rings=8)
+add_uv_sphere("Oltre la soglia | occhio destro", (0.82, 1.09, 5.95),
+              (0.090, 0.038, 0.058), occhi_ctoni, segments=12, rings=8)
 
 # Molten drips crawl down the inner tunnel walls flanking the doorway.
 for side in (-1, 1):
@@ -3421,7 +3438,7 @@ ll_.new(l_calore.outputs["Value"], l_rampa.inputs["Fac"])
 ll_.new(l_rampa.outputs["Color"], l_em.inputs["Color"])
 l_forza = ln_.new("ShaderNodeMapRange"); l_forza.location = (40, -380)
 l_forza.inputs["To Min"].default_value = 0.6
-l_forza.inputs["To Max"].default_value = 9.0
+l_forza.inputs["To Max"].default_value = 3.8
 ll_.new(l_calore.outputs["Value"], l_forza.inputs["Value"])
 ll_.new(l_forza.outputs["Result"], l_em.inputs["Strength"])
 l_cop = ln_.new("ShaderNodeMath"); l_cop.operation = "SUBTRACT"; l_cop.location = (380, 420)
@@ -3653,19 +3670,33 @@ def volume_ellissoide(name, centro, semiassi, material, rot_z=0.0):
 
 # Volumetric fog: foschia di cenere che avvolge tutta la valle, più spessa al
 # suolo. È questa a trasformare il bagliore della soglia in un alone e la lava
-# in controluce. Densità e anisotropia alzate perché la luce rossa della porta
-# e delle crepe si legga come fascio diffuso nel fumo (solo le luci calde
+# in controluce. Edizione IV: la foschia è scura e densa (albedo 0.23) e il
+# bagliore della soglia si diffonde come alone nel buio (solo le luci calde
 # illuminano il volume).
 foschia_mat = materiale_volume("Foschia di cenere | atmosfera della valle",
-                               (0.62, 0.50, 0.45), 0.0060, 0.035, 0.18, anisotropia=0.52,
-                               quota=(0.0, 16.0, 0.05), bordo=False)
+                               (0.23, 0.215, 0.21), 0.0125, 0.030, 0.18, anisotropia=0.56,
+                               quota=(0.0, 13.0, 0.08), bordo=False)
 foschia = add_box("Atmosfera | foschia di cenere", (0.0, 70.0, 20.0), (300.0, 250.0, 46.0),
                   foschia_mat, 0.0)
 
+# Banchi di nebbia scura radente: la valle respira nel buio, ma i banchi non
+# coprono mai l'asse della porta: il varco resta il solo buco di luce.
+nebbia_scura = materiale_volume("Nebbia scura | banchi radenti della valle",
+                                (0.11, 0.105, 0.100), 0.18, 3.2, 0.46, anisotropia=0.35,
+                                quota=(0.0, 7.0, 0.12))
+for _i, (_cx, _cy, _cz, _sx, _sy, _sz) in enumerate([
+        (-15.0, -16.0, 1.1, 11.0, 14.0, 3.4),
+        (17.0, -12.0, 1.3, 12.0, 13.0, 3.6),
+        (-7.0, -27.0, 0.9, 9.0, 10.0, 2.8),
+        (9.5, -25.0, 1.0, 10.0, 11.0, 3.0),
+        (0.0, 26.0, 1.6, 16.0, 12.0, 3.5)]):
+    volume_ellissoide(f"Banco di nebbia scura {_i + 1}", (_cx, _cy, _cz), (_sx, _sy, _sz),
+                      nebbia_scura)
+
 # Colonne di fumo alle spalle del monumento, illuminate dal basso dalla lava.
 fumo_mat = materiale_volume("Fumo volumetrico | colonne sopra la lava",
-                            (0.24, 0.19, 0.18), 0.36, 2.4, 0.42, anisotropia=0.25,
-                            emissione=((1.0, 0.16, 0.03), 0.020))
+                            (0.17, 0.135, 0.125), 0.34, 2.4, 0.42, anisotropia=0.25,
+                            emissione=((1.0, 0.16, 0.03), 0.012))
 rng = stable_rng("colonne di fumo")
 for i, (x, y, z, sx, sy, sz) in enumerate([
         (-14.0, 34.0, 13.0, 11.0, 8.0, 15.0), (12.0, 40.0, 16.0, 12.0, 9.0, 18.0),
@@ -3676,7 +3707,7 @@ for i, (x, y, z, sx, sy, sz) in enumerate([
 
 # Banchi di fumo radente ai lati del piazzale (mai davanti alla soglia).
 fumo_basso = materiale_volume("Fumo radente | nebbia di zolfo e cenere",
-                              (0.42, 0.34, 0.30), 0.30, 3.0, 0.44, anisotropia=0.40)
+                              (0.17, 0.15, 0.14), 0.34, 3.0, 0.44, anisotropia=0.40)
 for side in (-1, 1):
     volume_ellissoide(f"Fumo radente {side:+d}", (side * 19.0, -2.0, 0.6), (9.0, 13.0, 2.6), fumo_basso)
     volume_ellissoide(f"Fumo radente lontano {side:+d}", (side * 16.0, 18.0, 1.2), (12.0, 7.0, 3.5), fumo_basso)
@@ -3684,11 +3715,18 @@ for side in (-1, 1):
 # Pennacchi sopra la torre spezzata e ai lati della soglia (sostituiscono i tubi).
 fumo_torre = materiale_volume("Fumo volumetrico | pennacchi del monumento",
                               (0.26, 0.21, 0.20), 0.9, 1.6, 0.40, anisotropia=0.2,
-                              emissione=((1.0, 0.13, 0.02), 0.05))
+                              emissione=((1.0, 0.13, 0.02), 0.02))
 volume_ellissoide("Pennacchio della torre spezzata", (-7.1, -0.4, 16.4), (1.6, 1.3, 3.2), fumo_torre, 0.3)
 for side in (-1, 1):
     volume_ellissoide(f"Pennacchio del braciere {side:+d}", (side * 3.05, -1.6, 7.9),
                       (0.65, 0.55, 1.9), fumo_torre)
+
+# Esalazione: un respiro ctonio sale dal varco, tinto solo dalla luce della
+# soglia — il buio oltre la porta non è vuoto, respira.
+esalazione_mat = materiale_volume("Esalazione della soglia | respiro ctonio dal varco",
+                                  (0.10, 0.085, 0.085), 0.42, 2.2, 0.42, anisotropia=0.25,
+                                  emissione=((1.0, 0.11, 0.02), 0.020))
+volume_ellissoide("Esalazione della soglia", (0.0, 0.9, 2.6), (2.2, 1.5, 3.2), esalazione_mat)
 
 
 def nube_di_frammenti(name, n, material, rng, campiona, forma):
@@ -3747,12 +3785,12 @@ bl.new(b_at.outputs["Fac"], b_ramp.inputs["Fac"])
 bl.new(b_ramp.outputs["Color"], b_em.inputs["Color"])
 b_str = bn.new("ShaderNodeMapRange"); b_str.location = (0, -200)
 b_str.inputs["To Min"].default_value = 1.5
-b_str.inputs["To Max"].default_value = 11.0
+b_str.inputs["To Max"].default_value = 7.0
 bl.new(b_at.outputs["Fac"], b_str.inputs["Value"])
 bl.new(b_str.outputs["Result"], b_em.inputs["Strength"])
 bl.new(b_em.outputs["Emission"], b_out.inputs["Surface"])
 
-cenere_mat = principled_material("Cenere sospesa | fiocchi opachi", (0.16, 0.145, 0.14, 1), 0.0, 1.0)
+cenere_mat = principled_material("Cenere sospesa | fiocchi scuri", (0.10, 0.092, 0.090, 1), 0.0, 1.0)
 
 rng = stable_rng("braci sospese")
 
@@ -3791,7 +3829,7 @@ rng = stable_rng("cenere sospesa")
 
 def _campiona_cenere():
     while True:
-        c = Vector((rng.uniform(-20.0, 24.0), rng.uniform(-38.0, 14.0), rng.uniform(0.0, 22.0)))
+        c = Vector((rng.uniform(-27.0, 31.0), rng.uniform(-45.0, 20.0), rng.uniform(0.0, 22.0)))
         # La cenere si dirada davanti alla porta: lo sguardo resta libero.
         if abs(c.x) < 4.5 and c.z < 11.0 and c.y > -16.0 and rng.random() < 0.75:
             continue
@@ -3800,7 +3838,20 @@ def _campiona_cenere():
     return c, s, None, 0.0
 
 
-nube_di_frammenti("Cenere sospesa | fiocchi nell'aria", 2600, cenere_mat, rng, _campiona_cenere, _fiocco)
+nube_di_frammenti("Cenere sospesa | fiocchi nell'aria", 4600, cenere_mat, rng, _campiona_cenere, _fiocco)
+
+# Edizione IV: scaglie maggiori di cenere planano in quota, leggibili solo
+# quando la luce della soglia le sfiora.
+rng = stable_rng("cenere in quota")
+
+
+def _campiona_cenere_quota():
+    c = Vector((rng.uniform(-25.0, 30.0), rng.uniform(-45.0, 25.0), rng.uniform(3.0, 18.0)))
+    s = rng.uniform(0.030, 0.075)
+    return c, s, None, 0.0
+
+
+nube_di_frammenti("Cenere sospesa | scaglie in quota", 900, cenere_mat, rng, _campiona_cenere_quota, _fiocco)
 
 # Fondale lontano: il cielo è un velo di fumo arrossato dal basso.
 world.node_tree.nodes.clear()
@@ -3810,12 +3861,12 @@ w_bg.inputs["Strength"].default_value = 1.0
 w_tc = world.node_tree.nodes.new("ShaderNodeTexCoord"); w_tc.location = (-600, 0)
 w_sep = world.node_tree.nodes.new("ShaderNodeSeparateXYZ"); w_sep.location = (-400, 0)
 w_ramp = world.node_tree.nodes.new("ShaderNodeValToRGB"); w_ramp.location = (60, 0)
-w_ramp.label = "Orizzonte arrossato → cielo di fumo"
+w_ramp.label = "Orizzonte di brace → cielo quasi nero"
 w_ramp.color_ramp.elements[0].position = 0.50
-w_ramp.color_ramp.elements[0].color = (0.034, 0.0075, 0.003, 1)
-w_mid = w_ramp.color_ramp.elements.new(0.56); w_mid.color = (0.016, 0.0045, 0.003, 1)
+w_ramp.color_ramp.elements[0].color = (0.012, 0.0028, 0.0016, 1)
+w_mid = w_ramp.color_ramp.elements.new(0.56); w_mid.color = (0.005, 0.0013, 0.0009, 1)
 w_ramp.color_ramp.elements[2].position = 0.80
-w_ramp.color_ramp.elements[2].color = (0.0025, 0.0018, 0.0020, 1)
+w_ramp.color_ramp.elements[2].color = (0.0006, 0.0006, 0.0008, 1)
 w_mr = world.node_tree.nodes.new("ShaderNodeMapRange"); w_mr.location = (-200, 0)
 w_mr.inputs["From Min"].default_value = -1.0
 w_mr.inputs["From Max"].default_value = 1.0
@@ -3825,7 +3876,7 @@ wl.new(w_sep.outputs["Z"], w_mr.inputs["Value"])
 wl.new(w_mr.outputs["Result"], w_ramp.inputs["Fac"])
 wl.new(w_ramp.outputs["Color"], w_bg.inputs["Color"])
 wl.new(w_bg.outputs["Background"], w_out.inputs["Surface"])
-world.name = "Cielo di fumo | orizzonte arrossato dalla lava"
+world.name = "Cielo di fumo | quasi nero, brace lontano all'orizzonte"
 
 # -----------------------------------------------------------------------------
 # Camera e illuminazione cinematografica
@@ -3851,31 +3902,31 @@ def add_area_light(name, location, target, energy, color, size, shape="DISK"):
 # contribuisce solo con una debole luce fredda, per il contrasto cromatico
 # caldo/freddo; nessun riempimento neutro, così le ombre restano profonde.
 add_area_light("Luna | debole luce fredda d'ambiente", (-9.5,-12.5,17.5), (0,0,7.4),
-               1100, (0.45,0.60,1.0), 12.0)
+               260, (0.45,0.60,1.0), 12.0)
 add_area_light("Riflesso cremisi | lato destro", (9.5,-8.0,9.0), (0,0,5.5),
-               520, (1.0,0.23,0.10), 8.0)
+               240, (1.0,0.23,0.10), 8.0)
 add_area_light("Luce di taglio | blu abissale", (3.5,3.5,15.0), (0,0,8.0),
-               650, (0.15,0.28,1.0), 7.0)
+               210, (0.15,0.28,1.0), 7.0)
 
 # Strong rim lighting: profili di corona, frontone e torri tracciati da luce
 # fredda radente proveniente da dietro/lati. La sagoma scura si stacca netta
 # dal bagliore caldo della soglia (controluce freddo contro chiave calda).
 rim_corona = add_area_light("Rim freddo | profilo della corona", (0.0,16.0,24.0), (0.0,0.0,9.5),
-                            4500, (0.42,0.60,1.0), 11.0)
+                            950, (0.42,0.60,1.0), 11.0)
 rim_corona.visible_camera = False
 rim_torre = add_area_light("Rim freddo | torre spezzata", (-13.0,9.0,15.0), (-5.5,0.0,8.0),
-                           2200, (0.45,0.62,1.0), 7.0)
+                           480, (0.45,0.62,1.0), 7.0)
 rim_torre.visible_camera = False
 
 # La fonte luminosa principale: il cuore ardente oltre i battenti socchiusi.
 # Queste luci, insieme alle vene incandescenti più sotto, sono ora la chiave
 # della scena e bagnano di rosso/arancio la pietra del portale e i gradini.
 for name, location, energy, color, radius in [
-    ("Cuore della soglia", (0,1.45,3.2), 2600, (1.0,0.075,0.018), 1.9),
-    ("Lava riflessa sui gradini", (0,-2.6,1.1), 800, (1.0,0.12,0.018), 2.4),
-    ("Rimbalzo rosso sulle ali", (-5.3,-1.9,3.4), 340, (0.9,0.06,0.018), 1.3),
-    ("Rimbalzo rosso sulle ali | dx", (5.3,-1.9,3.4), 340, (0.9,0.06,0.018), 1.3),
-    ("Brace della torre spezzata", (-6.7,-1.4,13.4), 260, (1.0,0.10,0.02), 1.1),
+    ("Cuore della soglia", (0,1.45,3.2), 3600, (1.0,0.075,0.018), 1.9),
+    ("Lava riflessa sui gradini", (0,-2.6,1.1), 430, (1.0,0.12,0.018), 2.4),
+    ("Rimbalzo rosso sulle ali", (-5.3,-1.9,3.4), 200, (0.9,0.06,0.018), 1.3),
+    ("Rimbalzo rosso sulle ali | dx", (5.3,-1.9,3.4), 200, (0.9,0.06,0.018), 1.3),
+    ("Brace della torre spezzata", (-6.7,-1.4,13.4), 110, (1.0,0.10,0.02), 1.1),
 ]:
     data = bpy.data.lights.new(name,"POINT")
     data.energy = energy
@@ -3888,21 +3939,21 @@ for name, location, energy, color, radius in [
 # Physical lights for the infernal heat fused into the masonry: every vein,
 # vent and lava mirror casts its own warm light, so Cycles spreads real
 # reflections and orange/red indirect bounce across the nearby basalt.
-# Le crepe incandescenti sono la seconda fonte della scena: energia triplicata
-# perché ogni giunto ardente disegni il proprio alone sulla pietra.
+# Le crepe incandescenti sono la seconda fonte della scena: ridotte rispetto
+# al varco, così ogni giunto ardente accenna il proprio alone senza competere.
 for name, location, energy, color, radius in [
-    ("Vampa dell'abisso | cuore", (0,1.95,2.7), 5200, (1.0,0.16,0.02), 2.0),
-    ("Lago di lava | specchio sx", (-1.15,0.55,1.7), 1000, (1.0,0.10,0.012), 1.3),
-    ("Lago di lava | specchio dx", (1.25,0.55,2.6), 1000, (1.0,0.10,0.012), 1.3),
-    ("Vena dei piloni | sx", (-3.62,-1.30,2.85), 750, (1.0,0.12,0.02), 1.0),
-    ("Vena dei piloni | dx", (3.62,-1.30,2.85), 750, (1.0,0.12,0.02), 1.0),
-    ("Vena delle spalle | sx", (-5.38,-1.35,6.1), 650, (1.0,0.10,0.02), 1.0),
-    ("Vena delle spalle | dx", (5.38,-1.35,6.1), 650, (1.0,0.10,0.02), 1.0),
-    ("Giunti ardenti dell'arco", (0,-1.60,7.2), 800, (1.0,0.14,0.02), 1.8),
-    ("Colata oltre la soglia", (0.5,-0.85,0.62), 620, (1.0,0.11,0.02), 0.9),
-    ("Vena della torre | sx", (-6.80,-2.35,2.2), 540, (1.0,0.09,0.02), 1.0),
-    ("Vena della torre | dx", (6.80,-2.35,2.6), 540, (1.0,0.09,0.02), 1.0),
-    ("Braci del crollo | viva", (-6.7,-1.35,13.7), 420, (1.0,0.10,0.02), 0.8),
+    ("Vampa dell'abisso | cuore", (0,1.95,2.7), 8000, (1.0,0.16,0.02), 2.0),
+    ("Lago di lava | specchio sx", (-1.15,0.55,1.7), 470, (1.0,0.10,0.012), 1.3),
+    ("Lago di lava | specchio dx", (1.25,0.55,2.6), 470, (1.0,0.10,0.012), 1.3),
+    ("Vena dei piloni | sx", (-3.62,-1.30,2.85), 320, (1.0,0.12,0.02), 1.0),
+    ("Vena dei piloni | dx", (3.62,-1.30,2.85), 320, (1.0,0.12,0.02), 1.0),
+    ("Vena delle spalle | sx", (-5.38,-1.35,6.1), 280, (1.0,0.10,0.02), 1.0),
+    ("Vena delle spalle | dx", (5.38,-1.35,6.1), 280, (1.0,0.10,0.02), 1.0),
+    ("Giunti ardenti dell'arco", (0,-1.60,7.2), 380, (1.0,0.14,0.02), 1.8),
+    ("Colata oltre la soglia", (0.5,-0.85,0.62), 300, (1.0,0.11,0.02), 0.9),
+    ("Vena della torre | sx", (-6.80,-2.35,2.2), 240, (1.0,0.09,0.02), 1.0),
+    ("Vena della torre | dx", (6.80,-2.35,2.6), 240, (1.0,0.09,0.02), 1.0),
+    ("Braci del crollo | viva", (-6.7,-1.35,13.7), 180, (1.0,0.10,0.02), 0.8),
 ]:
     data = bpy.data.lights.new(name,"POINT")
     data.energy = energy
@@ -3915,12 +3966,12 @@ for name, location, energy, color, radius in [
 # Lava lontana: luci calde basse sotto le colonne di fumo. Il fumo, rischiarato
 # dal basso, diventa il fondale luminoso contro cui si staglia la porta.
 for name, location, energy, color, radius in [
-    ("Lava lontana | sotto il fumo sx", (-8.0, 33.0, 3.0), 2200, (1.0, 0.16, 0.025), 4.0),
-    ("Lava lontana | sotto il fumo dx", (8.0, 39.0, 3.0), 2600, (1.0, 0.15, 0.022), 4.0),
-    ("Lava lontana | dietro la porta", (-1.0, 50.0, 0.5), 7000, (1.0, 0.18, 0.03), 6.0),
-    ("Lava lontana | lago sinistro", (-31.0, 98.0, 1.5), 10500, (1.0, 0.14, 0.02), 8.0),
-    ("Lava lontana | lago destro", (19.0, 90.0, 1.5), 12000, (1.0, 0.14, 0.02), 9.0),
-    ("Lava lontana | fiumi convergenti", (0.0, 70.0, 1.0), 6000, (1.0, 0.15, 0.02), 8.0),
+    ("Lava lontana | sotto il fumo sx", (-8.0, 33.0, 3.0), 850, (1.0, 0.16, 0.025), 4.0),
+    ("Lava lontana | sotto il fumo dx", (8.0, 39.0, 3.0), 1000, (1.0, 0.15, 0.022), 4.0),
+    ("Lava lontana | dietro la porta", (-1.0, 50.0, 0.5), 2400, (1.0, 0.18, 0.03), 6.0),
+    ("Lava lontana | lago sinistro", (-31.0, 98.0, 1.5), 4200, (1.0, 0.14, 0.02), 8.0),
+    ("Lava lontana | lago destro", (19.0, 90.0, 1.5), 4800, (1.0, 0.14, 0.02), 9.0),
+    ("Lava lontana | fiumi convergenti", (0.0, 70.0, 1.0), 2400, (1.0, 0.15, 0.02), 8.0),
 ]:
     data = bpy.data.lights.new(name, "POINT")
     data.energy = energy
@@ -3934,7 +3985,7 @@ for name, location, energy, color, radius in [
 for side in (-1, 1):
     add_area_light(f"Controluce della lava | profili delle rupi {side:+d}",
                    (side * 22.0, 30.0, 2.5), (side * 13.0, -12.0, 1.0),
-                   12000, (1.0, 0.20, 0.04), 14.0, shape="RECTANGLE")
+                   4200, (1.0, 0.20, 0.04), 14.0, shape="RECTANGLE")
     bpy.data.objects[f"Controluce della lava | profili delle rupi {side:+d}"].visible_camera = False
 # Le luci fredde (luna, taglio blu, rim) restano sulle superfici ma non
 # accendono la foschia: il volumetric fog si colora solo del calore rosso e
@@ -4146,11 +4197,11 @@ scene.render.filepath = PREVIEW_PATH
 scene.render.image_settings.color_depth = "8"
 scene.view_settings.view_transform = "AgX"
 try:
-    scene.view_settings.look = "AgX - Medium High Contrast"
+    scene.view_settings.look = "AgX - High Contrast"
 except Exception:
     pass
-# +1/4 stop: la muratura monumentale resta leggibile nell'ombra profonda.
-scene.view_settings.exposure = 0.25
+# Esposizione quasi neutra: i neri restano neri e il varco domina la scena.
+scene.view_settings.exposure = -0.05
 scene.view_settings.gamma = 1.0
 scene.render.resolution_percentage = 100
 
@@ -4165,11 +4216,11 @@ glow.glare_type = "FOG_GLOW"
 glow.quality = "HIGH"
 # Blender 4.5 espone soglia/dimensione come socket, non proprietà del nodo.
 if "Threshold" in glow.inputs:
-    glow.inputs["Threshold"].default_value = 1.35
-    glow.inputs["Size"].default_value = 0.14
-    glow.inputs["Strength"].default_value = 0.45
+    glow.inputs["Threshold"].default_value = 1.15
+    glow.inputs["Size"].default_value = 0.12
+    glow.inputs["Strength"].default_value = 0.60
 else:
-    glow.threshold = 1.35
+    glow.threshold = 1.15
     glow.size = 7
 glow.location = (0,0)
 comp = nt.nodes.new("CompositorNodeComposite")
@@ -4182,10 +4233,10 @@ scene["Opera"] = "La Porta dell'Inferno — interpretazione originale da Inferno
 scene["Iscrizione"] = "Lasciate ogni speranza, voi ch'entrate"
 scene["Nota"] = "Modello procedurale dettagliato: geometria, battenti apribili, intagli e shader modificabili."
 scene["Calore infernale"] = "Vene di magma tra i conci, lago di lava nella profondità della porta, fuoriuscite di fuoco: emissione + luci fisiche, riflessi e rimbalzi caldi in Cycles."
-scene["Edizione"] = "III • Scala monumentale (~29,6 m) e figure umane di riferimento"
-scene["Illuminazione"] = "Chiave rossa/arancio dall'interno della porta e dalle crepe incandescenti; debole luce fredda d'ambiente per il contrasto cromatico; ombre profonde, volumetric fog acceso solo dal calore, forte rim lighting fredda sui profili e controluce caldo della lava sulle rupi."
+scene["Edizione"] = "IV • Il buio ostile: la soglia è l'unica vera luce"
+scene["Illuminazione"] = "Edizione IV (buio ostile): il varco è l'unica vera fonte di luce — Vampa 8000 W e Cuore 3600 W; luna 260 W, taglio blu 210 W e rim freddi 950/480 W ridotti a sussurro; crepe e lava lontana quasi dimezzate. Foschia scura e densa (0.0125), banchi di nebbia radente, esalazione ctonia dal varco, cenere più fitta e più scura. Oltre la soglia, due occhi appena intravisti: qualcosa di antico e ostile."
 scene["Dettagli modellati"] = "Orbite/naso scavati, 16 denti per cranio, corna rastremate, acanto, trafori, anime in rilievo, meccanica dei cardini, conci scheggiati."
-scene["Ambiente infernale"] = "Valle di terreno vulcanico nero, rupi e massi fratturati, foschia di cenere e colonne di fumo volumetrico, braci sospese concentrate sulla soglia, fiumi di lava solo in lontananza: la porta resta il punto focale."
+scene["Ambiente infernale"] = "Valle di terreno vulcanico nero, rupi e massi fratturati, cielo quasi nero con brace lontano, foschia scura e densa con banchi di nebbia radente ed esalazione dal varco, cenere sospesa più fitta e più scura, braci concentrate sulla soglia, lava lontana ridotta a brace: la porta è l'unico punto davvero luminoso."
 scene["Seed"] = 73
 scene["Camere di dettaglio"] = "Battenti • Corona e trafori • Custode"
 scene["Dimensioni indicative"] = "circa 24,0 x 29,6 x 9,6 unità Blender (metri): il tridente svetta a ~29,6 m"
@@ -4229,7 +4280,7 @@ scene["Oggetti"] = len(bpy.data.objects)
 scene["Materiali"] = len(bpy.data.materials)
 scene["Vertici mesh (senza istanze)"] = sum(len(m.vertices) for m in bpy.data.meshes)
 readme = bpy.data.texts.new("LEGGIMI • Porta dell'Inferno dettagliata")
-readme.write("""LA PORTA DELL'INFERNO • EDIZIONE III
+readme.write("""LA PORTA DELL'INFERNO • EDIZIONE IV — IL BUIO OSTILE
 
 SCALA UMANA E MONUMENTALE
 Il monumento è alto ~29,6 m (tridente compreso): decine di metri di basalto.
@@ -4261,22 +4312,31 @@ porta, chiuso da una parete fusa; piccole fuoriuscite di fuoco e faville
 seguono le crepe. L'emissione del magma e le luci puntiformi dedicate
 producono riflessi e luce indiretta arancione/rossa sulle superfici vicine.
 
-ILLUMINAZIONE CINEMATOGRAFICA
-La fonte principale è il calore che esce dalla porta socchiusa e dalle crepe
-incandescenti: rosso e arancio bagnano la pietra, i gradini e i bassorilievi.
-L'ambiente esterno porta solo una debole luce fredda (luna e taglio blu) per
-il contrasto cromatico; nessun riempimento neutro, quindi ombre profonde.
-Volumetric fog acceso esclusivamente dalle luci calde: il bagliore della
-soglia diventa un alone diffuso nel fumo. Forte rim lighting fredda sui
-profili di corona e torri, controluce caldo della lava sulle rupi.
+ILLUMINAZIONE CINEMATOGRAFICA — IL BUIO OSTILE (EDIZIONE IV)
+La scena è più scura, brutale e inquietante: il varco è l'unica vera fonte
+di luce. Vampa dell'abisso (8000 W) e Cuore della soglia (3600 W) escono dai
+battenti socchiusi; luna (260 W), taglio blu (210 W) e rim freddi
+(950/480 W) sono ridotti a un sussurro, crepe e lava lontana quasi
+dimezzate. AgX in alta contrasto, esposizione quasi neutra, alone del
+compositore più stretto e forte: solo la porta brilla davvero.
+
+Foschia scura e densa (albedo 0.23, densità 0.0125, anisotropia 0.56), più
+spessa al suolo; banchi di nebbia nera radente sul piazzale e un respiro
+ctonio che sale dal varco, tinto solo dalla luce della soglia. La pioggia di
+cenere è più fitta e più scura, con scaglie maggiori in quota.
+
+Oltre la soglia, nella profondità, due fessure di luce rossa appena
+intraviste nella foschia: non fiamme, ma occhi. Qualcosa di antico e ostile
+attende oltre quel limite.
 
 AMBIENTE INFERNALE
-La porta è il punto più luminoso e contrastato: l'ambiente le fa da cornice.
-Terreno vulcanico nero (heightfield reale) piatto attorno alla soglia, che si
-alza in una valle verso i bordi. Rupi e massi a facce di frattura, più bassi
-vicino al monumento. Foschia di cenere più densa al suolo e colonne di fumo
-volumetrico (Principled Volume) illuminate dal basso dalla lava lontana.
-Braci con scia concentrate sulla soglia, cenere opaca rada davanti alla porta.
+La porta è l'unico punto davvero luminoso e il resto le fa da cornice di
+ombra. Terreno vulcanico nero (heightfield reale) piatto attorno alla
+soglia, che si alza in una valle verso i bordi. Rupi e massi a facce di
+frattura, più bassi vicino al monumento. Cielo quasi nero con appena brace
+all'orizzonte. Foschia scura e densa, banchi di nebbia radente ed esalazione
+dal varco; colonne di fumo e braci illuminate solo dal calore della soglia.
+La cenere sospesa è più fitta e più scura, rada davanti alla porta.
 Luna e luci fredde non accendono la foschia (visibilità Volume Scatter spenta).
 
 Rigenera con porta_inferno.py. Usa -- --no-render per il solo modello.

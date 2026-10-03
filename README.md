@@ -1,8 +1,10 @@
-# La Porta dell'Inferno — Blender · Edizione III
+# La Porta dell'Inferno — Blender · Edizione IV — Il buio ostile
 
-Modello 3D originale ispirato all'**Inferno, Canto III** di Dante: portale gotico in basalto con tre ordini di archi a sesto acuto, torri contrafforte asimmetriche, frontone spezzato, battenti di ferro socchiusi, custodi alati, catene, fuoco e l'iscrizione *«Lasciate ogni speranza, voi ch'entrate»*. La porta si trova ora al centro di un **ambiente infernale cinematografico**: valle vulcanica nera, rupi fratturate, cenere e fumo volumetrico, braci sospese e lava in lontananza.
+Modello 3D originale ispirato all'**Inferno, Canto III** di Dante: portale gotico in basalto con tre ordini di archi a sesto acuto, torri contrafforte asimmetriche, frontone spezzato, battenti di ferro socchiusi, custodi alati, catene, fuoco e l'iscrizione *«Lasciate ogni speranza, voi ch'entrate»*. La porta si trova al centro di un **ambiente infernale cinematografico**: valle vulcanica nera, rupi fratturate, nebbia scura e cenere sospesa, braci e lava in lontananza.
 
-**Questa edizione aggiunge dettaglio alla geometria, non soltanto ai materiali.** Intagli, sculture, scheggiature, pieghe e meccanismi restano visibili anche senza texture.
+**Questa edizione riscrive la luce: la scena è più scura, brutale e inquietante.** La luce che esce dalla porta socchiusa è l'unico elemento davvero luminoso; il resto è ombra, foschia scura e cenere. Oltre la soglia, nella profondità, due occhi appena intravisti: qualcosa di antico e ostile attende.
+
+**Le edizioni precedenti hanno aggiunto dettaglio alla geometria, non soltanto ai materiali.** Intagli, sculture, scheggiature, pieghe e meccanismi restano visibili anche senza texture.
 
 ## Scala umana, monumento opprimente
 
@@ -18,8 +20,8 @@ La camera principale è a **1,95 m dal suolo** (occhio umano) e guarda verso l'a
 
 Apri **`porta_dell_inferno.blend`** in Blender **4.5 o successivo**. La scena è già inquadrata; premi **F12** per il render finale.
 
-- **3.658 oggetti**, organizzati in **6 collezioni**; le piccole primitive condividono le mesh per mantenere il progetto leggero.
-- **36 materiali** inclusi (tre sono volumi procedurali), senza texture, font o librerie esterne da scaricare.
+- **oltre 3.660 oggetti**, organizzati in **6 collezioni**; le piccole primitive condividono le mesh per mantenere il progetto leggero.
+- **39 materiali** inclusi (sei sono volumi procedurali), senza texture, font o librerie esterne da scaricare.
 - Render finale: **Cycles CPU, 2000 × 2320 px, 128 campioni massimi**, adaptive sampling e denoise accurato.
 - **4 camere**: inquadratura principale radente al suolo (1,95 m, verticali convergenti) e dettagli di battenti, corona/trafori e custode. Seleziona una camera di dettaglio nell'Outliner e premi **Ctrl + Numpad 0**.
 - **Sette figure umane di riferimento** (~1,78 m) negli empty `Figura umana | …`: pellegrino, dannati della soglia e processione; vedi *Scala umana, monumento opprimente*.
@@ -81,15 +83,17 @@ Il monumento non è più solo *illuminato* dal fuoco: il calore nasce **dentro**
 - **Piccole fuoriuscite di fuoco**: lingue di fiamma e nuclei d'oro nascono dove le vene raggiungono la superficie, con faville sospese e veli di fumo caldo.
 - **Illuminazione fisica**: ogni vena, specchio di lava e fuoriuscita ha una luce puntiforme dedicata (12 luci arancio/rosso) e l'emissione del magma partecipa al GI; con `diffuse_bounces = 4` il bagliore rimbalza realisticamente sul basalto, producendo riflessi caldi sui conci, sul ferro dei battenti e sui gradini.
 
-## Illuminazione cinematografica
+## Illuminazione cinematografica — il buio ostile (Edizione IV)
 
-La scena è trattata come un set cinematografico notturno, con una gerarchia precisa tra le fonti:
+La scena è più scura, brutale e inquietante: il varco è l'unica vera fonte di luce, e tutto il resto è ombra che gli fa da cornice.
 
-- **Fonte principale dall'interno della porta**: il *Cuore della soglia* e la *Vampa dell'abisso* (5200 W) sono ora la chiave della scena; la luce rossa e arancione esce dai battenti socchiusi, bagna i gradini, il ferro e la pietra del portale.
-- **Crepe incandescenti come sorgenti**: ogni vena di magma (piloni, spalle, archivolto, torri) ha una luce dedicata con energia triplicata; l'emissione del magma sale a 10 e la parete fusa nelle profondità a 6,5, così ogni giunto ardente disegna il proprio alone sulla pietra.
-- **Debole luce fredda d'ambiente**: la luna (1100 W, blu) e il taglio blu abissale (650 W) restano solo per il contrasto cromatico caldo/freddo, senza competere con la chiave. I riempimenti neutri sono stati rimossi: le ombre sono profonde e nessuna luce lava i neri.
-- **Volumetric fog**: la foschia di cenere è più densa (0,0060) e più anisotropa (0,52); le luci fredde hanno *Volume Scatter* spento, quindi il fumo si accende solo del calore rosso/arancio della soglia e delle crepe, con il bagliore che si diffonde come alone volumetrico.
-- **Strong rim lighting**: due area light fredde fuori campo (4500 e 2200 W) tracciano i profili di corona, frontone e torre spezzata, mentre il controluce caldo della lava (12000 W) borda le rupi sullo sfondo: la sagoma scura si stacca netta dal bagliore.
+- **Fonte principale dall'interno della porta**: il *Cuore della soglia* (3600 W) e la *Vampa dell'abisso* (8000 W) sono la chiave della scena; la luce rossa e arancione esce dai battenti socchiusi e bagna i gradini, il ferro e la pietra del portale. È l'unico elemento davvero luminoso dell'immagine.
+- **Crepe incandescenti come sorgenti secondarie**: ogni vena di magma ha una luce dedicata ridotta (180–470 W, prima fino a 1000); l'emissione del magma è scesa a 6,5 e la parete fusa nelle profondità a 5,5, così ogni giunto ardente accenna il proprio alone senza competere con il varco.
+- **Luce d'ambiente ridotta a sussurro**: la luna (260 W, blu) e il taglio blu abissale (210 W) sono quasi spenti; i riempimenti neutri restano assenti e le ombre sono nere.
+- **Volumetric fog scuro**: la foschia di cenere è scura (albedo 0,23), più densa (0,0125) e più anisotropa (0,56), più spessa al suolo; banchi di nebbia nera radente scorrono sul piazzale e un'esalazione ctonia sale dal varco, tinta solo dalla luce della soglia. Le luci fredde hanno *Volume Scatter* spento: il volume si accende solo del calore rosso.
+- **Contrasto elevato**: AgX *High Contrast*, esposizione quasi neutra (−0,05) e alone del compositore più stretto e intenso: solo il varco brilla, tutto il resto affonda nel buio.
+- **Rim e controluce ridotti**: i rim freddi (950 e 480 W) tracciano appena i profili di corona e torri; il controluce della lava (4200 W) e i laghi lontani (4200/4800 W, emissione max 3,8) restano una brace di fondo, mai una seconda chiave.
+- **Oltre la soglia**: nella profondità del varco, due fessure di luce rossa appena intraviste nella foschia — non fiamme, ma occhi. Qualcosa di antico e ostile attende oltre quel limite.
 
 ## Ambiente infernale
 
@@ -98,9 +102,9 @@ L'ambiente è costruito come **cornice della porta**: il monumento resta l'area 
 - **Terreno vulcanico nero**: heightfield reale (nessun modificatore) piatto attorno al basamento, con dune basse di cenere in primo piano. Ai lati sale in una valle che si chiude verso i bordi dell'inquadratura, come una vignetta fisica. Il materiale `Terreno vulcanico | cenere nera e ossidiana` mescola basalto quasi nero, cenere sulle facce esposte, ossidiana lucida e fratture irregolari.
 - **Rocce fratturate**: massi e schegge generati come inviluppi convessi irregolari, tagliati da piani netti (vere facce di frattura). Le rupi sono blocchi impilati e inclinati: **basse vicino alla porta, più alte ai bordi**, così il loro profilo scende verso la soglia. Sullo sfondo ci sono guglie lontane, in sagoma.
 - **Lava solo in lontananza**: fiumi incandescenti e due laghi, con crosta nera e crepe vive (`Lava lontana | …`), incassati nella piana oltre il monumento. I fiumi convergono verso la base della porta. Sui monti dell'orizzonte non ci sono colate, per non creare un secondo punto luminoso.
-- **Fumo volumetrico**: una foschia di cenere (`Principled Volume`) avvolge la valle ed è più densa al suolo. Colonne di fumo alle spalle del monumento sono illuminate dal basso dalle luci della lava; ai lati del piazzale scorrono banchi radenti, mai davanti alla soglia. Due pennacchi salgono dalla torre spezzata e dai bracieri.
-- **Braci sospese e cenere**: le braci sono bipiramidi allungate lungo la direzione di volo e simulano una scia. Hanno intensità variabile, data da un attributo `calore`, e si addensano attorno alla soglia, più rade altrove. I fiocchi di cenere sono opachi e si diradano nel cono visivo davanti alla porta. Ogni sciame è una sola mesh, quindi resta leggera.
-- **Luce**: il cielo è un velo di fumo arrossato verso l'orizzonte. Luci calde basse sotto le colonne di fumo creano un controluce che stacca la silhouette del monumento. Luna e luci fredde continuano a scolpire la pietra ma non accendono la foschia (`visible_volume_scatter = False`), così il volume si colora solo del calore.
+- **Fumo volumetrico**: una foschia di cenere scura (`Principled Volume`) avvolge la valle, più densa al suolo; banchi di nebbia nera radente scorrono sul piazzale e un'esalazione ctonia sale dal varco. Colonne di fumo alle spalle del monumento sono illuminate dal basso dalla brace lontana; i banchi radenti non coprono mai la soglia. Due pennacchi salgono dalla torre spezzata e dai bracieri.
+- **Braci sospese e cenere**: le braci sono bipiramidi allungate lungo la direzione di volo e simulano una scia. Hanno intensità variabile, data da un attributo `calore`, e si addensano attorno alla soglia, più rade altrove. La pioggia di cenere è più fitta (4.600 fiocchi più 900 scaglie maggiori in quota) e più scura; i fiocchi restano opachi e si diradano nel cono visivo davanti alla porta. Ogni sciame è una sola mesh, quindi resta leggera.
+- **Luce**: il cielo è quasi nero, con appena brace verso l'orizzonte. Luci calde basse sotto le colonne di fumo creano un controluce che stacca la silhouette del monumento. Luna e luci fredde continuano a scolpire la pietra ma non accendono la foschia (`visible_volume_scatter = False`), così il volume si colora solo del calore.
 
 Tutto l'ambiente usa semi stabili (`stable_rng`): non altera l'RNG globale né la geometria del monumento. I volumi rendono il render più lento rispetto all'edizione precedente.
 
