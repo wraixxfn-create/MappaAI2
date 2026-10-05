@@ -108,6 +108,28 @@ L'ambiente è costruito come **cornice della porta**: il monumento resta l'area 
 
 Tutto l'ambiente usa semi stabili (`stable_rng`): non altera l'RNG globale né la geometria del monumento. I volumi rendono il render più lento rispetto all'edizione precedente.
 
+## Il gioco: esplora la mappa in 3D
+
+La cartella **`game/`** contiene un'esplorazione in prima persona di questa
+stessa mappa: si cammina nella valle di cenere, si sale la scalinata
+cerimoniale, si raccolgono i versi delle sette figure umane e infine si
+spingono i battenti di ferro. Geometria, luci, proporzioni e posizione delle
+anime arrivano dal `.blend`: non c'è un livello ricostruito a mano.
+
+```bash
+cd game
+npm install     # solo la prima volta
+npm start       # http://localhost:8080
+```
+
+Comandi: `W A S D` per camminare, `Shift` per correre, `Spazio` per saltare,
+`E` per parlare e spingere, `F` per la lanterna, `M` per la mappa, `Esc` per la
+pausa.
+
+Il gioco usa gli asset generati in `game/public/` da `game/tools/export_map.sh`
+(leggi `game/README.md` per i dettagli e per i 52 test headless che verificano
+che la mappa sia davvero percorribile).
+
 ## Rigenera la scena
 
 Con Blender installato, dalla cartella del progetto:

@@ -1,0 +1,20 @@
+{
+  "name": "porta-dell-inferno-game",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Esplorazione in prima persona della mappa porta_dell_inferno.blend",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test --import ./tests/register.js \"tests/*.test.js\""
+  },
+  "dependencies": {
+    "three": "^0.186.1",
+    "three-mesh-bvh": "^0.9.15",
+    "meshoptimizer": "^1.3.0"
+  },
+  "devDependencies": {
+    "gltfpack": "^1.3.0",
+    "gltf-validator": "2.0.0-dev.3.10"
+  }
+}

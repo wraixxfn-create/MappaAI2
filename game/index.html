@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>La Porta dell'Inferno — esplorazione della mappa 3D</title>
+<meta name="description" content="Esplora in prima persona la mappa porta_dell_inferno.blend: la valle di cenere, il portale gotico di basalto e la soglia dell'Inferno di Dante." />
+<link rel="stylesheet" href="./style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three-addons/",
+    "three-mesh-bvh/": "./vendor/three-mesh-bvh/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<!-- ------------------------------ HUD ------------------------------ -->
+<div id="hud" class="hidden" aria-hidden="true">
+  <div id="crosshair"><span></span></div>
+
+  <div id="vignette"></div>
+  <div id="heat-flash"></div>
+
+  <div id="topbar">
+    <div id="compass"><div id="compass-strip"></div><div id="compass-mark"></div></div>
+    <div id="objective">Trova le anime della soglia</div>
+  </div>
+
+  <div id="bottom-left">
+    <div id="sigilli">
+      <span class="label">Anime</span>
+      <span id="sigilli-count">0</span><span class="dim">/7</span>
+    </div>
+    <div id="hope-wrap">
+      <span class="label">Speranza</span>
+      <div id="hope-bar"><div id="hope-fill"></div></div>
+    </div>
+  </div>
+
+  <div id="minimap-wrap">
+    <canvas id="minimap" width="180" height="180"></canvas>
+    <div id="minimap-label">valle di cenere</div>
+  </div>
+
+  <div id="subtitle"></div>
+  <div id="prompt"><kbd>E</kbd><span id="prompt-text"></span></div>
+  <div id="toast"></div>
+
+  <div id="controls-hint">
+    <span><kbd>W A S D</kbd> muoviti</span>
+    <span><kbd>Shift</kbd> corri</span>
+    <span><kbd>Spazio</kbd> salta</span>
+    <span><kbd>F</kbd> lanterna</span>
+    <span><kbd>M</kbd> mappa</span>
+    <span><kbd>Esc</kbd> pausa</span>
+  </div>
+
+  <div id="touch" class="hidden">
+    <div id="stick"><div id="stick-knob"></div></div>
+    <div id="touch-buttons">
+      <button id="btn-jump" type="button">salta</button>
+      <button id="btn-use" type="button">E</button>
+    </div>
+  </div>
+</div>
+
+<!-- --------------------------- Schermate --------------------------- -->
+<div id="overlay">
+  <section id="screen-loading" class="screen">
+    <h1 class="title">La Porta dell&#8217;Inferno</h1>
+    <p class="kicker">Inferno, Canto III &middot; esplorazione della mappa <code>porta_dell_inferno.blend</code></p>
+    <div id="load-bar"><div id="load-fill"></div></div>
+    <p id="load-status">Apertura del modello&hellip;</p>
+  </section>
+
+  <section id="screen-menu" class="screen hidden">
+    <h1 class="title">La Porta dell&#8217;Inferno</h1>
+    <p class="kicker">Il monumento è alto trenta metri. Tu ne misuri uno e settantotto.</p>
+    <p class="pitch">
+      Sete anime sono ferme nella cenere, tra il piazzale e i gradini.
+      Raggiungile, ascolta ciò che resta della loro voce e raccogli i sigilli:
+      solo allora i battenti di ferro cederanno.
+      La speranza si consuma nel buio &mdash; resta vicino al calore.
+    </p>
+    <button id="btn-start" class="primary" type="button">Entra nella valle</button>
+    <div class="keys">
+      <div><kbd>W A S D</kbd><span>muoviti</span></div>
+      <div><kbd>Mouse</kbd><span>guardati intorno</span></div>
+      <div><kbd>Shift</kbd><span>corri</span></div>
+      <div><kbd>Spazio</kbd><span>salta</span></div>
+      <div><kbd>E</kbd><span>parla / spingi i battenti</span></div>
+      <div><kbd>F</kbd><span>lanterna</span></div>
+      <div><kbd>M</kbd><span>mappa della valle</span></div>
+      <div><kbd>Esc</kbd><span>pausa e impostazioni</span></div>
+    </div>
+    <p class="fine">Geometria, luci e punti di interesse esportati dal file <code>.blend</code> originale.</p>
+  </section>
+
+  <section id="screen-pause" class="screen hidden">
+    <h2>Pausa</h2>
+    <div class="settings">
+      <label>Luminosità <input id="set-exposure" type="range" min="0.4" max="2.6" step="0.05" value="1" /></label>
+      <label>Campo visivo <input id="set-fov" type="range" min="55" max="95" step="1" value="72" /></label>
+      <label>Sensibilità <input id="set-sens" type="range" min="0.3" max="3" step="0.05" value="1" /></label>
+      <label class="check"><input id="set-audio" type="checkbox" checked /> Audio ambientale</label>
+      <label class="check"><input id="set-particles" type="checkbox" checked /> Braci e cenere</label>
+    </div>
+    <div id="pause-stats" class="fine"></div>
+    <button id="btn-resume" class="primary" type="button">Torna nella valle</button>
+    <button id="btn-restart" type="button">Ricomincia</button>
+  </section>
+
+  <section id="screen-map" class="screen hidden">
+    <h2>La valle di cenere</h2>
+    <canvas id="bigmap" width="900" height="620"></canvas>
+    <p class="fine">Altezze del terreno e calore delle braci calcolati dal modello 3D. Premi <kbd>M</kbd> per chiudere.</p>
+  </section>
+
+  <section id="screen-dead" class="screen hidden">
+    <h1 class="title red">Lasciate ogne speranza</h1>
+    <p class="pitch" id="dead-text">Il buio ha preso ciò che restava.</p>
+    <button id="btn-respawn" class="primary" type="button">Rialzati sui gradini</button>
+  </section>
+
+  <section id="screen-end" class="screen hidden">
+    <h1 class="title red">Oltre la soglia</h1>
+    <p class="pitch" id="end-text"></p>
+    <div id="end-stats" class="fine"></div>
+    <button id="btn-again" class="primary" type="button">Torna nella valle</button>
+  </section>
+
+  <section id="screen-error" class="screen hidden">
+    <h2>Il modello non si apre</h2>
+    <p class="pitch" id="error-text"></p>
+  </section>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
