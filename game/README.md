@@ -14,6 +14,7 @@ ricostruito a mano.
 cd game
 npm install          # solo la prima volta: serve a gltfpack e ai test
 npm start            # apre http://localhost:8080
+node server.js
 ```
 
 Il server è un semplice server di file statici: nessun bundler, nessuna CDN.
