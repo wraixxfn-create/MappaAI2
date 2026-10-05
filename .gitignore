@@ -6,3 +6,8 @@
 __pycache__/
 *.pyc
 *.log
+
+# Ambiente Python con bpy (usato solo per esportare la mappa)
+.venv/
+# Dipendenze del gioco: vendor/ contiene già i moduli serviti al browser
+game/node_modules/
