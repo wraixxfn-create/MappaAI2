@@ -1,21 +1,5 @@
 # La Porta dell'Inferno — Blender · Edizione IV — Il buio ostile
 
-## Gioco esplorabile nel browser
-
-Il progetto include anche **La via delle anime**, una piccola avventura 2D ambientata nell'Inferno dantesco. Muoviti nella mappa, attraversa la Selva del Limbo e l'Acheronte, raccogli i tre sigilli e raggiungi la Porta dell'Inferno. La carta si svela seguendo le tue impronte; puoi scoprire i luoghi, leggere i frammenti di storia e segnare una destinazione sulla mappa.
-
-Per avviarlo dalla cartella del progetto:
-
-```bash
-python3 -m http.server 8000 --bind 0.0.0.0
-```
-
-Apri poi `http://localhost:8000` nel browser. Comandi: **WASD / frecce** per muoverti, **Shift** per correre, **E** per interagire e **M** per aprire la mappa. Su telefono sono disponibili i controlli touch. I progressi vengono salvati localmente nel browser.
-
-I file del gioco sono `index.html`, `styles.css` e `game.js`; il render della porta già incluso nel repository appare nel pannello narrativo della soglia.
-
----
-
 Modello 3D originale ispirato all'**Inferno, Canto III** di Dante: portale gotico in basalto con tre ordini di archi a sesto acuto, torri contrafforte asimmetriche, frontone spezzato, battenti di ferro socchiusi, custodi alati, catene, fuoco e l'iscrizione *«Lasciate ogni speranza, voi ch'entrate»*. La porta si trova al centro di un **ambiente infernale cinematografico**: valle vulcanica nera, rupi fratturate, nebbia scura e cenere sospesa, braci e lava in lontananza.
 
 **Questa edizione riscrive la luce: la scena è più scura, brutale e inquietante.** La luce che esce dalla porta socchiusa è l'unico elemento davvero luminoso; il resto è ombra, foschia scura e cenere. Oltre la soglia, nella profondità, due occhi appena intravisti: qualcosa di antico e ostile attende.
